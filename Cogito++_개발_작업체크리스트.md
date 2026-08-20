@@ -711,6 +711,17 @@ ctest --preset windows-msvc-debug -C Debug -R "canonical" --output-on-failure
 - [ ] WAL/디스크 임계에서 조회를 먼저 차단할 hook을 만든다.
 - [ ] audit read가 writer를 장시간 차단하지 않는 부하 test를 준비한다.
 
+### S5-11. Reason code 완전성
+
+- [ ] 원본 §3-4의 stage 1~7, audit, indeterminate, allowed code를 단일 registry로 만든다.
+- [ ] 모든 Gate 반환 경로가 registry에 있는 code 하나를 사용한다.
+- [ ] 등록된 code마다 최소 한 개의 positive emission test를 둔다.
+- [ ] 중복 문자열, 빈 code, 잘못된 stage 소유권을 compile/test에서 거부한다.
+- [ ] `schema_violation`과 `pattern_timeout`, forbidden과 absent, policy deny/conflict/no-match를 각각 구분한다.
+- [ ] approval rejected/expired/consumed/scope/reentry/self/nonce를 각각 구분한다.
+- [ ] 표시 문구를 바꿔도 golden/API/UI 분기가 깨지지 않는지 검사한다.
+- [ ] major version 안에서 삭제·의미 변경을 ABI/API compatibility gate로 막는다.
+
 **S5 Exit Gate**
 
 - [ ] Gate 1→7 순서와 reason code가 전체 행렬에서 고정됐다.
@@ -1619,3 +1630,281 @@ clang++ -std=c++17 -Wall -Wextra -Werror -Iinclude -c tests/abi/cpp_header_smoke
 - [ ] offline target/browser에서 외부 network와 Node/npm 실행 0회다.
 - [ ] embedded bytes digest = `dist.sha256` = state = `turn_begin`이다.
 - [ ] C++/npm 통합 SBOM과 license gate가 통과한다.
+
+---
+
+## 15. S11 — 통합 보증, 패키징, 운영, 릴리스
+
+### S11-01. Build profile 전수
+
+- [ ] core-only, default(audit+HTTP+CLI), HTTP-curl, llama CPU, OPC UA, Web, full 제품 profile을 명시한다.
+- [ ] 각 profile의 CMake option과 vcpkg feature 조합을 자동 비교한다.
+- [ ] OFF feature의 source/symbol/link/runtime dependency가 0인지 확인한다.
+- [ ] Windows x64 Debug/Release, Linux x64 Debug/Release, Linux ARM64 Release를 build한다.
+- [ ] static Core/shared ABI 조합과 승인된 CRT/runtime linkage를 확인한다.
+- [ ] compiler 최소 version과 실제 dependency port가 호환되는지 clean runner에서 확인한다.
+- [ ] 모든 generated file이 clean build에서 재생성되거나 committed source와 일치하는지 검사한다.
+
+### S11-02. CI 계층
+
+- [ ] PR fast lane에 format/lint, pure C header, `@thread`, manifest, Core/default build, unit, package consumer, license/secret scan을 둔다.
+- [ ] compiler lane에 MSVC/GCC/Clang을 두고 CCJ/digest/golden artifact를 byte compare한다.
+- [ ] ASan+UBSan lane에서 Core, ABI ownership, provider parser, OPC codec, Web host를 실행한다.
+- [ ] TSan lane에서 thread affinity, cancel, snapshot, event/command queue를 실행한다.
+- [ ] fuzz lane에서 CCJ/action/schema/policy/HTTP/SSE/GBNF/OPC manifest/Markdown URL corpus를 실행한다.
+- [ ] integration lane은 local TLS server, small pinned GGUF, in-process OPC server만 사용하고 외부 cloud/PLC credential을 쓰지 않는다.
+- [ ] nightly에 ARM64, long fuzz, load, offline rebuild, chain verify를 둔다.
+- [ ] release lane은 아래 S11-10 순서를 강제한다.
+- [ ] crash/minimized corpus, compiler/version, logs, digests를 artifact로 보존한다.
+
+### S11-03. Static analysis와 source policy
+
+- [ ] clang-tidy/CodeQL 또는 승인 도구의 범위와 baseline을 고정한다.
+- [ ] new warning 0 정책을 적용하고 suppression에는 issue/owner/expiry를 요구한다.
+- [ ] secret scanner가 config/example/test fixture의 실제 credential을 탐지한다.
+- [ ] `json.dump()` digest 사용, direct handler call, direct audit DB open, owner-only ABI call을 custom grep/AST rule로 검사한다.
+- [ ] `FetchContent`, unpinned URL, runtime CDN, `npx *latest`, forbidden Markdown API를 검사한다.
+- [ ] hardcoded FSM edges와 display string 기반 reason 분기를 검사한다.
+- [ ] binary/source에 banned claim 문자열이 없는지 documentation lint를 실행한다.
+
+### S11-04. 성능과 자원 상한
+
+- [ ] target x86-64와 Jetson 모델/OS/CPU/RAM/storage를 정확히 기록한다.
+- [ ] CCJ/schema/Gate/audit commit/inference/tool/Web queue/SSE/audit query의 benchmark를 분리한다.
+- [ ] cold/warm, p50/p95/p99, sample 수, input size, feature profile을 기록한다.
+- [ ] Audit WAL/DB, event queue, pending approval, outcome cache, SSE client, command queue memory 상한을 측정한다.
+- [ ] disk full/WAL growth/slow client/large prompt/large tool output에서 bounded failure를 확인한다.
+- [ ] 측정 전 LOC/메모리/latency/bundle 추정치를 문서·발표·UI에 쓰지 않는다.
+- [ ] 성능 목표 미달을 안전 check 제거나 queue 무제한으로 해결하지 않는다.
+
+### S11-05. Offline 재현 build
+
+- [ ] vcpkg registry/source/binary cache를 x64-windows, x64-linux, arm64-linux와 모든 release profile에 seed한다.
+- [ ] llama source/patch/GGUF/template/tokenizer를 checksum manifest로 반입한다.
+- [ ] Web asset는 x86-64에서 build해 embedded source+digest만 target에 반입한다.
+- [ ] 빈 사용자 cache, DNS/egress 차단 환경에서 configure/build/test/package smoke를 수행한다.
+- [ ] `FetchContent`, ExternalProject download, npm, model download, CDN request가 0인지 process/network log로 확인한다.
+- [ ] 미등록 artifact가 필요하면 build가 명확히 실패하고 외부 origin으로 fallback하지 않는다.
+- [ ] offline mirror 갱신, 승인, checksum, rollback 절차를 Runbook에 쓴다.
+
+### S11-06. SBOM, license, vulnerability
+
+- [ ] 실제 링크·bundle·배포 file 기준 CycloneDX SBOM을 만든다.
+- [ ] vcpkg, vendored picosha2/shadcn, llama/backend, open62541, npm을 포함한다.
+- [ ] build-only와 runtime component를 구분한다.
+- [ ] license 표현 `OR`, `AND`, `SEE LICENSE`, legacy ID를 parser가 다룬다.
+- [ ] UNKNOWN, UNLICENSED, missing license는 자동 통과하지 않는다.
+- [ ] NOTICE/THIRD_PARTY_LICENSES와 package file을 대조한다.
+- [ ] vulnerability scanner의 DB timestamp, severity, exception owner/expiry를 기록한다.
+- [ ] 원본이 언급한 CRA 보고 일정은 법무/보안 책임자가 최신 법적 의무를 별도 확인하고 incident workflow에 반영한다.
+- [ ] 공개 취약점 접수→triage→완화→보고→release 모의 훈련을 수행한다.
+
+### S11-07. 패키징과 provenance
+
+- [ ] Windows ZIP/MSI 또는 승인 format, Linux TGZ/package format을 고정한다.
+- [ ] version, git commit, dirty flag=false, vcpkg baseline, feature profile, compiler, llama commit, asset digest를 provenance에 넣는다.
+- [ ] artifact별 SHA-256과 조직 서명을 만든다.
+- [ ] debug symbol을 제품 package와 분리해 access-controlled artifact로 둔다.
+- [ ] package file allowlist를 생성하고 model/secret/private key/audit DB/log/test credential이 0인지 검사한다.
+- [ ] clean VM/container에서 install→CLI version→audit verify→C/C++ consumer→Web offline smoke를 수행한다.
+- [ ] uninstall/upgrade가 audit DB와 operator data를 임의 삭제하지 않는지 확인한다.
+- [ ] rollback package와 database/config compatibility를 문서화한다.
+
+### S11-08. Audit DB migration, backup, restore
+
+- [ ] schema version table과 forward-only migration을 구현한다.
+- [ ] migration 전 chain verify와 backup/checksum을 수행한다.
+- [ ] migration failure 시 원본을 보존하고 agent를 ready로 만들지 않는다.
+- [ ] newer DB를 older binary가 임의 downgrade하지 않게 한다.
+- [ ] WAL 포함 online backup 또는 승인된 shutdown backup 절차를 정한다.
+- [ ] restore 뒤 chain head/process epoch/dangling recovery를 검증한다.
+- [ ] retention/purge가 append-only 계약과 충돌하므로 archive/anchor/새 chain 시작 절차를 ADR로 정한다.
+- [ ] disk free/WAL threshold alert와 audit read shedding을 운영 test한다.
+
+### S11-09. 운영 Runbook
+
+- [ ] startup self-test/config/secret/model/TLS/audit chain 실패 진단과 안전 상태를 적는다.
+- [ ] `finalize_pending` retry와 seal의 권한, step-up, 비가역 영향, 감사 결과를 적는다.
+- [ ] indeterminate 발생 시 설비 확인, operation/line lockdown, operator ack 절차를 적는다.
+- [ ] pending approval 교대 인수인계, 만료, 취소, 자기 승인 예외 절차를 적는다.
+- [ ] certificate/secret rotation과 실패 rollback을 적는다.
+- [ ] audit DB lock/disk full/WAL growth/chain tamper 대응을 적는다.
+- [ ] process epoch 변경 뒤 client full refresh와 replay 금지를 적는다.
+- [ ] provider/OPC UA offline, timeout, cert mismatch, model hash mismatch 대응을 적는다.
+- [ ] emergency stop과 기능 안전 조작은 Cogito++가 아니라 기존 안전 계통을 사용함을 명시한다.
+- [ ] service graceful shutdown/start 순서와 active turn 처리 방식을 적는다.
+- [ ] 운영자 tabletop과 현장 모의훈련에서 Runbook만으로 복구 가능한지 확인한다.
+
+### S11-10. Release gate 순서
+
+- [ ] 1. clean tag/commit에서 Release build를 수행한다.
+- [ ] 2. 전체 unit/integration/golden/Web/ABI test를 수행한다.
+- [ ] 3. ASan/UBSan/TSan와 release fuzz smoke를 통과한다.
+- [ ] 4. public symbol/ABI layout diff를 승인한다.
+- [ ] 5. install 및 out-of-tree C/C++/C# consumer를 실행한다.
+- [ ] 6. offline rebuild/runtime smoke를 수행한다.
+- [ ] 7. SBOM/license/vulnerability/secret scan을 통과한다.
+- [ ] 8. package file allowlist와 provenance를 검증한다.
+- [ ] 9. checksums/signatures를 검증한다.
+- [ ] 10. staging/target hardware acceptance를 통과한다.
+- [ ] 11. release note, known residual risks, upgrade/rollback Runbook을 승인한다.
+- [ ] 12. 위 단계가 모두 성공한 뒤에만 artifact를 게시한다.
+
+### S11-11. Staging과 현장 인수
+
+- [ ] production과 같은 TLS/auth/role/line/policy/OPC security profile을 staging에 적용한다.
+- [ ] read-only→승인 write→reject→expire→cancel→indeterminate→ack→finalize retry 시나리오를 순서대로 수행한다.
+- [ ] 각 시나리오에서 actual write count와 audit seq/hash를 검증한다.
+- [ ] network disconnect, browser restart, host restart, OPC disconnect, disk pressure를 주입한다.
+- [ ] Web이 없어도 CLI 복구 경로가 동작하는지 확인한다.
+- [ ] 1024×768 panel, touch, 교대 운영, timezone, offline 조건을 실기 확인한다.
+- [ ] 안전 책임자가 “승인 전 write 0, 승인 후 최대 1, 불확실 시 indeterminate” 증거를 서명한다.
+- [ ] 보안 책임자가 auth/CSRF/SOD/TLS/CSP/audit read/secret 증거를 서명한다.
+- [ ] 운영 책임자가 Runbook/backup/monitoring/rollback을 서명한다.
+- [ ] pilot line 범위와 observation 기간, stop/rollback 기준을 승인한다.
+
+### S11-12. 문서와 표현 정합성
+
+- [ ] 기획안의 `AlwaysAllow`를 제거하고 반복 면제는 고우선 policy rule로 표현한다.
+- [ ] ESP32는 전체 Core target이 아니라 MQTT/serial sensor node 연동으로 표현한다.
+- [ ] local model GBNF는 `grammar_coverage`만큼 부분 적용되고 runtime validation은 항상 수행한다고 적는다.
+- [ ] “RFC 8785 준수”, “Schema가 물리 안전 보장”, “WAL이 append-only 보장” 문구를 쓰지 않는다.
+- [ ] “같은 입력이면 같은 실행 경로”, 검증되지 않은 수치, “OPC UA Certified”를 쓰지 않는다.
+- [ ] “대시보드에서 설비를 제어”, “Web UI가 승인을 안전하게 만듦”을 쓰지 않는다.
+- [ ] cpp-httplib SSE는 chunked provider 위 직접 구현이라고 정확히 적는다.
+- [ ] FSM 화면은 `cogito_dump_transitions`에서 생성된다고 적는다.
+- [ ] README, docs, UI, CLI help, release note, 발표자료를 같은 lint 목록으로 검사한다.
+
+**S11 / Release Exit Gate**
+
+- [ ] 모든 이전 S0~S10 Exit Gate가 완료됐다.
+- [ ] release profile 전체가 clean/offline 환경에서 재현된다.
+- [ ] Core/C ABI/Provider/OPC/Web/Package의 필수 test와 sanitizer가 통과한다.
+- [ ] write 0/1회, audit order, approval binding, indeterminate 복구 증거가 보존됐다.
+- [ ] SBOM/license/vulnerability/provenance/signature가 artifact와 일치한다.
+- [ ] 현장 책임자 3개 역할의 인수 서명이 있다.
+- [ ] unresolved 안전/보안 차단 0건이고 accepted residual risk만 남았다.
+
+---
+
+## 16. 권장 첫 작업 순서
+
+실제 개발은 다음 PR 단위로 시작하는 편이 안전하다. 각 PR은 앞 PR의 Exit Gate가 통과된 뒤 merge한다.
+
+1. **PR-001 — G0 결정 문서만**: G0-01~G0-33 owner/결론, Core v1 계약, ABI v1.1, CCJ 지수, regex/timeout, Web 제품 결정을 확정한다.
+2. **PR-002 — 저장소/빌드만**: S0 골격, pinned vcpkg, presets, warning/test/install smoke를 만든다.
+3. **PR-003 — Error/ID/Clock만**: 외부 dependency 없이 기본 contract와 FakeClock을 만든다.
+4. **PR-004 — Strict JSON/CCJ만**: 24 vectors, malformed corpus, startup self-test를 먼저 통과시킨다.
+5. **PR-005 — Digest만**: vendored hash, LP/domain vectors, 3 compiler comparison을 고정한다.
+6. **PR-006 — Schema compiler만**: whitelist/pattern/coverage와 fail-closed startup을 만든다.
+7. **PR-007 — Tool/Registry만**: contract/tombstone/freeze/digest/export를 만든다.
+8. **PR-008 — FSM만**: table/R1-R3/BFS/DumpTable/연속 턴을 만든다.
+9. **PR-009 — Policy/Budget만**: pure decision과 counter reservation을 만든다.
+10. **PR-010 — Approval/Permit만**: nonce/SOD/state/reentry/single-use를 만든다.
+11. **PR-011 — Audit만**: recording journal부터 SQLite/chain/recovery까지 만든다.
+12. **PR-012 — Gate만**: 1~7 pure decision과 전체 행렬을 만든다.
+13. **PR-013 — Invoker/Loop만**: commit protocol/finalize/indeterminate와 golden replay를 완성한다.
+14. **PR-014 — ABI/CLI만**: v1.1 surface, ownership/thread/async approval/package consumer를 완성한다.
+15. 이후 Provider, OPC UA, Web은 각각 독립 feature branch에서 진행하되 Core/ABI 변경은 공동 회귀 gate를 다시 통과한다.
+
+첫 코딩 작업은 PR-001이 merge되기 전 시작하지 않는다. 특히 CCJ, 승인, timeout, indeterminate, finalize, ABI의 임시 구현은 이후 digest·감사·호환성을 전부 깨뜨릴 수 있다.
+
+---
+
+## 17. 검증 명령 카탈로그
+
+실제 preset 이름은 S0에서 확정한 값으로 치환한다.
+
+```powershell
+# Windows configure/build/test
+cmake --preset windows-msvc-debug
+cmake --build --preset windows-msvc-debug --config Debug --parallel
+ctest --preset windows-msvc-debug -C Debug --output-on-failure
+
+# 특정 계층
+ctest --preset windows-msvc-debug -C Debug -R "canonical|core|audit" --output-on-failure
+ctest --preset windows-msvc-debug -C Debug -R "abi" --output-on-failure
+ctest --preset windows-msvc-debug -C Debug -R "web" --output-on-failure
+
+# 설치 소비자
+cmake --install build/windows-msvc-release --config Release --prefix artifacts/install
+cmake -S tests/package/consumer-c -B build/consumer-c -DCMAKE_PREFIX_PATH=artifacts/install
+cmake --build build/consumer-c --config Release
+
+# 원본 및 generated file 추적
+git status --short
+git diff --check
+rg -n "REPLACE_WITH_|TODO|FIXME|AlwaysAllow|dangerouslySetInnerHTML|rehype-raw|FetchContent" .
+```
+
+```bash
+# Linux sanitizer lanes
+cmake --preset linux-clang-asan
+cmake --build --preset linux-clang-asan --parallel
+ctest --preset linux-clang-asan --output-on-failure
+
+cmake --preset linux-clang-tsan
+cmake --build --preset linux-clang-tsan --parallel
+ctest --preset linux-clang-tsan --output-on-failure
+
+# 공개 심볼
+nm -D --defined-only build/linux-release/lib/libcogito.so
+
+# 숨은 다운로드/우회 경로 점검
+rg -n "FetchContent|ExternalProject_Add|https?://|cdn\.|npx .*latest" CMakeLists.txt cmake src tools
+rg -n "sqlite3_open|WebSocket|dangerouslySetInnerHTML|rehype-raw" tools include src
+```
+
+---
+
+## 18. 단계별 증거 보관 규칙
+
+- [ ] `artifacts/verification/<milestone>/<commit>/`에 command, stdout/stderr, test XML, compiler/version을 보관한다.
+- [ ] 골든 결과에는 config/policy/registry/model/template/asset digest를 함께 둔다.
+- [ ] write 안전 test에는 Fake/OPC server의 실제 call count를 둔다.
+- [ ] audit test에는 시작/끝 seq, chain head, VerifyChain 결과를 둔다.
+- [ ] Web test에는 browser version, CSP console, network HAR, viewport screenshot을 둔다.
+- [ ] offline test에는 차단 방식, process/network trace, 사용한 cache manifest를 둔다.
+- [ ] package test에는 file manifest, SBOM, license report, checksum, signature verify 결과를 둔다.
+- [ ] 현장 인수에는 hardware/OS/browser/line profile과 승인자 서명을 둔다.
+- [ ] artifact에 secret, nonce, 전체 tool argument, 실제 생산 데이터가 들어가지 않게 redaction 검사한다.
+
+---
+
+## 19. 현 명세만으로 구현하지 말아야 할 범위
+
+아래는 이름이나 build option만 있고 완전한 계약·테스트가 없으므로 별도 승인 전 구현 완료로 간주하지 않는다.
+
+- MQTT adapter 전체: transport/session/QoS/topic ACL/idempotency/감사/테스트 계약이 없다.
+- RAG 전체: index format, provenance, poisoning 방어, compaction, retrieval limit 계약이 없다.
+- MCP runtime 전체: 참조된 §10-3이 없고 discover/transport/tool lifecycle 상세가 없다.
+- 다중 agent/다중 line 단일 process: audit writer, lockdown, session/FSM 소유 모델이 정의되지 않았다.
+- 외부 audit anchoring과 보존 purge: chain 전환/anchor/복구 계약이 없다.
+- 정식 OPC UA 인증, 기능 안전 인증, ESP32에서 전체 Core 실행: 명세가 지원한다고 주장하지 않는다.
+
+이 항목이 필요해지면 별도 ADR만으로 끝내지 말고 데이터 계약, threat model, failure semantics, test matrix, 운영 Runbook을 포함한 후속 구현 명세를 먼저 작성한다.
+
+---
+
+## 20. 최종 마스터 체크
+
+- [ ] 원본 구현 명세의 source hash와 이 체크리스트의 기준 version이 일치한다.
+- [ ] G0-01~G0-33이 모두 Resolved 또는 명시적 Out of Scope다.
+- [ ] S0 계약·저장소·build Exit Gate 완료.
+- [ ] S1 CCJ/digest 3-platform 결정론 Exit Gate 완료.
+- [ ] S2 Schema/Registry/Config Exit Gate 완료.
+- [ ] S3 FSM Exit Gate 완료.
+- [ ] S4 Policy/Budget/Approval/Permit Exit Gate 완료.
+- [ ] S5 Gate/Audit Exit Gate 완료.
+- [ ] S6 AgentLoop/golden replay Exit Gate 완료.
+- [ ] S7 ABI v1.1/CLI/package Exit Gate 완료.
+- [ ] 릴리스 포함 시 S8 Provider Exit Gate 완료.
+- [ ] 릴리스 포함 시 S9 OPC UA Exit Gate 완료.
+- [ ] 릴리스 포함 시 S10 Web Exit Gate 완료.
+- [ ] S11 release/field acceptance Exit Gate 완료.
+- [ ] traceability matrix에서 orphan requirement, orphan test, orphan public API가 0건이다.
+- [ ] 모든 안전 실패 fixture에서 예상 write count가 0 또는 정확히 1이다.
+- [ ] 모든 release artifact의 SBOM/license/provenance/signature가 검증됐다.
+- [ ] 알려진 미결·잔여 위험·비범위가 release note와 운영자에게 전달됐다.
+
+이 마스터 체크가 전부 완료되기 전에는 “구현 완료”, “현장 배포 가능”, “안전 보장”으로 표기하지 않는다.
