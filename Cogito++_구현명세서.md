@@ -1937,7 +1937,7 @@ CREATE TABLE IF NOT EXISTS chain_anchor (
 전역 순서 권위   : seq  (AUTOINCREMENT — 재사용되지 않음)
 프로세스 내 순서 : (process_epoch_id, monotonic_ns) 사전식
 표시·상관관계    : wall_time_utc  — 순서 판정에 사용하지 않는다
-§14-3 monotonic 테스트는 동일 process_epoch_id 범위 내에서만 검사한다.
+`Cogito++_구현_요구사항.md` §14-3 의 monotonic 테스트는 동일 process_epoch_id 범위 내에서만 검사한다.
 ```
 
 추가로 `sqlite3_set_authorizer`로 `SQLITE_UPDATE` / `SQLITE_DELETE` / `SQLITE_DROP_TABLE` / `SQLITE_DROP_TRIGGER`를 `audit_event`에 대해 거부한다. 이는 **프로세스 내 사고 방지**이지 로컬 관리자에 대한 변조 방지가 아니다 — 파일 권한·암호화·백업·외부 앵커링이 함께 필요하다.
@@ -3013,7 +3013,7 @@ endif()
 | `web/csrf` | Origin 없음 / allowlist 외 Origin / `text/plain` 본문 / CSRF 헤더 누락 각각에 대해 승인이 성립하지 않고 **write 0회** |
 | `web/single_command_path` | 이벤트 스트림으로 전송된 approve 유사 프레임이 상태를 바꾸지 않음 · WebSocket 업그레이드 요청이 거부됨 |
 | `web/thread_affinity` | 워커 스레드에서 `agent-loop-only` 함수 직접 호출 시 `COGITO_ERR_WRONG_THREAD` + **상태 무변경** (TSan 하에서) |
-| `web/approval_ui` | §14-4의 prompt injection fixture를 승인 화면 렌더링 경로에 적용 · 권위 영역에 외부 유래 문자열이 **한 글자도** 들어가지 않음 · 만료 후 승인 클릭이 write 0회 |
+| `web/approval_ui` | `tests/fixtures/prompt_injection.json`(`Cogito++_구현_요구사항.md` §14-4 가 요구하는 fixture. **아직 존재하지 않으며 Claude 가 작성한다**)을 승인 화면 렌더링 경로에 적용 · 권위 영역에 외부 유래 문자열이 **한 글자도** 들어가지 않음 · 만료 후 승인 클릭이 write 0회 |
 | `web/sse_resume` | 연결 단절 후 `Last-Event-ID` 재생에서 유실·중복 0 · `process_epoch_id` 변경 시 재생하지 않음 · 클라이언트 0명일 때 발생한 `PENDING_APPROVAL`이 `/api/approvals/pending`에 남아 있음 |
 | `web/lifetime` | 요청 중단·탭 종료가 **취소로 해석되지 않음** · 연결 0개 상태에서 턴이 끝까지 진행되어 `turn_end` 정확히 1회 |
 | `web/idempotency` | 동일 `command_id` 재제출이 재실행 없이 원래 결과 반환 · 승인 이중 클릭에서 write 1회 |

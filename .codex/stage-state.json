@@ -1,0 +1,40 @@
+{
+  "$schema": "./stage-state.schema.json",
+  "schema_version": 3,
+  "active_ticket": null,
+  "baseline_head_oid": null,
+  "phase": "idle",
+  "g0_gate": "not_passed",
+  "contract_review": "not_run",
+  "contract_reference": null,
+  "allowed_write_paths": [],
+  "shared_write": {
+    "approved": false,
+    "paths": [],
+    "reference": null
+  },
+  "verification": {
+    "ticket": null,
+    "commands": [],
+    "evidence_dir": null,
+    "manifest_file": null,
+    "verdict_file": null,
+    "verifier": "not_run",
+    "stage_exit_gate": "not_evaluated",
+    "head_oid": null,
+    "workspace_fingerprint": null
+  },
+  "publication": {
+    "commit_authorized": false,
+    "push_authorized": false,
+    "merge_authorized": false,
+    "pull_request_authorized": false,
+    "release_authorized": false,
+    "reference": null
+  },
+  "safety": {
+    "destructive_git_authorized": false,
+    "destructive_files_authorized": false,
+    "reference": null
+  }
+}

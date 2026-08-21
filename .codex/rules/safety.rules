@@ -1,0 +1,159 @@
+# Cogito++ commands that must never bypass review or destroy local work.
+
+prefix_rule(
+    pattern = ["git", "reset", "--hard"],
+    decision = "forbidden",
+    justification = "Hard reset can erase user or another agent's work. Use a reviewed, path-specific recovery plan.",
+    match = ["git reset --hard", "git reset --hard HEAD~1"],
+    not_match = ["git reset --soft HEAD~1"],
+)
+
+prefix_rule(
+    pattern = ["git", "clean", ["-f", "-fd", "-df", "-xdf", "-xfd"]],
+    decision = "forbidden",
+    justification = "Git clean can irreversibly remove untracked work owned by another AI or the user.",
+    match = ["git clean -f", "git clean -fd", "git clean -xdf"],
+    not_match = ["git clean -n", "git clean --dry-run"],
+)
+
+prefix_rule(
+    pattern = ["git", "checkout", "--"],
+    decision = "forbidden",
+    justification = "Path checkout can overwrite uncommitted work. Inspect the diff and request explicit recovery approval.",
+    match = ["git checkout -- src/file.cpp", "git checkout -- ."],
+    not_match = ["git checkout codex/s1-05-ccj"],
+)
+
+prefix_rule(
+    pattern = ["git", "restore"],
+    decision = "prompt",
+    justification = "Restore can overwrite changes and requires an explicit, path-specific user decision.",
+    match = ["git restore src/file.cpp", "git restore --staged src/file.cpp"],
+)
+
+prefix_rule(
+    pattern = ["git", "commit"],
+    decision = "prompt",
+    justification = "Codex commits only when the user explicitly requests publication of the reviewed scope.",
+    match = ["git commit -m test", "git commit --no-verify -m test"],
+)
+
+prefix_rule(
+    pattern = ["git", "push", ["--force", "-f", "--force-with-lease"]],
+    decision = "forbidden",
+    justification = "Force-push is not part of the normal Cogito++ workflow. Publish a new reviewed commit instead.",
+    match = ["git push --force origin branch", "git push -f origin branch", "git push --force-with-lease origin branch"],
+    not_match = ["git push origin codex/s1-05-ccj"],
+)
+
+prefix_rule(
+    pattern = ["git", "push", "origin", ["main", "master"]],
+    decision = "forbidden",
+    justification = "Direct pushes to protected branches are forbidden. Open a reviewed PR from codex/<ticket>-<slug>.",
+    match = ["git push origin main", "git push origin master"],
+    not_match = ["git push origin codex/s1-05-ccj"],
+)
+
+prefix_rule(
+    pattern = ["git", "push"],
+    decision = "prompt",
+    justification = "Any push is external publication and requires the user's explicit request for the reviewed branch.",
+    match = ["git push", "git push origin codex/s1-05-ccj"],
+)
+
+prefix_rule(
+    pattern = ["git", ["merge", "rebase", "cherry-pick", "pull"]],
+    decision = "prompt",
+    justification = "History integration can mix another writer's work and requires an explicit, reviewed user decision.",
+    match = ["git merge main", "git rebase main", "git cherry-pick abc123", "git pull origin main"],
+)
+
+prefix_rule(
+    pattern = ["git", "branch", ["-D", "-d"]],
+    decision = "forbidden",
+    justification = "Branch deletion can remove an unmerged recovery point. Preserve it and ask the user for a separate cleanup decision.",
+    match = ["git branch -D codex/s1-05-ccj", "git branch -d codex/s1-05-ccj"],
+    not_match = ["git branch --show-current"],
+)
+
+prefix_rule(
+    pattern = ["git", "worktree", ["remove", "prune"]],
+    decision = "prompt",
+    justification = "Worktree cleanup can discard or hide another AI's changes and requires path-specific user approval.",
+    match = ["git worktree remove ../other", "git worktree prune"],
+    not_match = ["git worktree list"],
+)
+
+prefix_rule(
+    pattern = ["gh", "pr", ["create", "merge"]],
+    decision = "prompt",
+    justification = "Creating or merging a PR is external publication and requires the user's explicit request.",
+    match = ["gh pr create --draft", "gh pr merge 42"],
+    not_match = ["gh pr view 42", "gh pr checks 42"],
+)
+
+prefix_rule(
+    pattern = ["git", "tag"],
+    decision = "prompt",
+    justification = "Tags are release artifacts and require explicit human release authority.",
+    match = ["git tag v1.0.0", "git tag -s v1.0.0 -m release"],
+)
+
+prefix_rule(
+    pattern = ["gh", "release", "create"],
+    decision = "prompt",
+    justification = "A GitHub release is a human-authorized publication and signing boundary.",
+    match = ["gh release create v1.0.0"],
+    not_match = ["gh release view v1.0.0"],
+)
+
+prefix_rule(
+    pattern = ["git", ["rm", "mv"]],
+    decision = "forbidden",
+    justification = "Repository file moves and removals must use apply_patch so exact paths and deletion authority are checked.",
+    match = ["git rm src/file.cpp", "git mv src/old.cpp src/new.cpp"],
+)
+
+prefix_rule(
+    pattern = ["git", ["update-ref", "symbolic-ref", "filter-branch", "replace", "notes"]],
+    decision = "forbidden",
+    justification = "Low-level ref mutation bypasses the reviewed branch, publication, and session-delta workflow.",
+    match = ["git update-ref refs/heads/main HEAD", "git symbolic-ref HEAD refs/heads/main"],
+)
+
+prefix_rule(
+    pattern = ["git", "reset"],
+    decision = "prompt",
+    justification = "Any reset mutates HEAD or the index and requires an explicit, scope-specific recovery decision.",
+    match = ["git reset --soft HEAD~1", "git reset --mixed HEAD~1"],
+    not_match = ["git status --short"],
+)
+
+prefix_rule(
+    pattern = ["git", "push", ["-fu", "-uf", "--mirror", "--all", "--delete", "--prune"]],
+    decision = "forbidden",
+    justification = "Combined force flags and bulk, deletion, mirror, or prune pushes bypass the reviewed single-branch publication scope.",
+    match = ["git push -fu origin feature", "git push --mirror origin", "git push --delete origin feature"],
+    not_match = ["git push -u origin codex/s1-05-ccj"],
+)
+
+prefix_rule(
+    pattern = ["git", "branch", ["-f", "-M"], ["main", "master"]],
+    decision = "forbidden",
+    justification = "The protected main/master ref must never be force-created, replaced, or renamed by Codex.",
+    match = ["git branch -f main HEAD", "git branch -M master"],
+)
+
+prefix_rule(
+    pattern = ["git", "switch", ["-C", "--force-create"], ["main", "master"]],
+    decision = "forbidden",
+    justification = "The protected main/master ref must never be force-created or replaced by Codex.",
+    match = ["git switch -C main", "git switch --force-create master"],
+)
+
+prefix_rule(
+    pattern = ["git", ["revert", "am"]],
+    decision = "prompt",
+    justification = "Revert and mail-patch application mutate history and the worktree and require explicit user authorization.",
+    match = ["git revert HEAD", "git am patch.mbox"],
+)

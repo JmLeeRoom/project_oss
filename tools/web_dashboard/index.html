@@ -1,0 +1,322 @@
+﻿<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self' ws://localhost:8080 http://localhost:8080 ws: http:; font-src 'self'; ">
+  <title>Cogito++ Industrial AI Agent HMI Dashboard</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="bg-industrial-dark text-industrial-text font-sans">
+  <div class="h-screen w-screen flex flex-col overflow-hidden">
+    <!-- Top Header -->
+    <header class="h-14 border-b border-industrial-border bg-industrial-panel px-6 flex items-center justify-between shrink-0">
+      <div class="flex items-center gap-3">
+        <div class="w-8 h-8 rounded-lg bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center font-bold text-emerald-400">
+          C++
+        </div>
+        <div>
+          <h1 class="text-base font-semibold tracking-wide text-white flex items-center gap-2">
+            Cogito++ Agent Core
+            <span class="text-xs px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">HMI Host v1.0</span>
+          </h1>
+        </div>
+      </div>
+      
+      <div class="flex items-center gap-6 text-xs">
+        <div class="flex items-center gap-2">
+          <span class="text-industrial-muted">Session:</span>
+          <span id="session-id" class="font-mono text-industrial-accent">Connecting...</span>
+        </div>
+        <div class="flex items-center gap-2">
+          <span class="text-industrial-muted">Mode:</span>
+          <span class="px-2 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/30 font-mono">Default</span>
+        </div>
+        <div class="flex items-center gap-2">
+          <span class="text-industrial-muted">WS State:</span>
+          <span id="ws-indicator" class="flex items-center gap-1.5 text-emerald-400 font-medium">
+            <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+            Connected
+          </span>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Content Grid -->
+    <div class="flex-1 grid grid-cols-12 gap-4 p-4 min-h-0 overflow-hidden">
+      <!-- Left Column: FSM Visualizer & Quick Actions (5 cols) -->
+      <div class="col-span-5 flex flex-col gap-4 min-h-0">
+        <!-- FSM Graph Card -->
+        <div class="bg-industrial-panel border border-industrial-border rounded-xl p-4 flex flex-col">
+          <div class="flex items-center justify-between mb-3">
+            <h2 class="text-sm font-semibold text-white flex items-center gap-2">
+              <svg class="w-4 h-4 text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"></circle>
+                <polygon points="10 8 16 12 10 16 10 8"></polygon>
+              </svg>
+              AgentLoop FSM State Machine
+            </h2>
+            <span id="fsm-badge" class="px-2.5 py-0.5 rounded-full text-xs font-mono font-semibold bg-emerald-500/20 text-emerald-400 border border-emerald-500/40">
+              Idle
+            </span>
+          </div>
+
+          <!-- Pure SVG State Diagram (100% CSP compliant, zero inline styles) -->
+          <div class="w-full h-36 bg-industrial-darker rounded-lg border border-industrial-border/60 flex items-center justify-center p-2">
+            <svg id="fsm-svg" class="w-full h-full" viewBox="0 0 540 100">
+              <!-- Connectors -->
+              <line x1="60" y1="50" x2="140" y2="50" class="fsm-edge"></line>
+              <line x1="140" y1="50" x2="220" y2="50" class="fsm-edge"></line>
+              <line x1="220" y1="30" x2="310" y2="25" class="fsm-edge"></line>
+              <line x1="220" y1="70" x2="390" y2="75" class="fsm-edge"></line>
+              <line x1="310" y1="25" x2="390" y2="25" class="fsm-edge"></line>
+              <line x1="390" y1="50" x2="470" y2="50" class="fsm-edge"></line>
+              <path d="M 470 50 C 470 95, 60 95, 60 50" class="fsm-edge fsm-edge-loop"></path>
+
+              <!-- State Nodes -->
+              <!-- 1. Idle -->
+              <g id="node-Idle" class="fsm-node fsm-active">
+                <circle cx="60" cy="50" r="22" class="node-bg"></circle>
+                <text x="60" y="54" class="node-text">Idle</text>
+              </g>
+
+              <!-- 2. Thinking -->
+              <g id="node-Thinking" class="fsm-node">
+                <circle cx="140" cy="50" r="22" class="node-bg"></circle>
+                <text x="140" y="54" class="node-text">Think</text>
+              </g>
+
+              <!-- 3. GateEvaluating -->
+              <g id="node-GateEvaluating" class="fsm-node">
+                <circle cx="220" cy="50" r="22" class="node-bg"></circle>
+                <text x="220" y="54" class="node-text">Gate</text>
+              </g>
+
+              <!-- 4. PendingApproval (Ask) -->
+              <g id="node-PendingApproval" class="fsm-node">
+                <circle cx="310" cy="25" r="20" class="node-bg node-ask"></circle>
+                <text x="310" y="29" class="node-text text-ask">Ask</text>
+              </g>
+
+              <!-- 5. Executing -->
+              <g id="node-Executing" class="fsm-node">
+                <circle cx="390" cy="50" r="22" class="node-bg"></circle>
+                <text x="390" y="54" class="node-text">Exec</text>
+              </g>
+
+              <!-- 6. Finalizing -->
+              <g id="node-Finalizing" class="fsm-node">
+                <circle cx="470" cy="50" r="22" class="node-bg"></circle>
+                <text x="470" y="54" class="node-text">Final</text>
+              </g>
+            </svg>
+          </div>
+        </div>
+
+        <!-- Quick Interactive Scenarios -->
+        <div class="bg-industrial-panel border border-industrial-border rounded-xl p-4 flex flex-col gap-2.5">
+          <h2 class="text-sm font-semibold text-white flex items-center gap-2 mb-1">
+            <svg class="w-4 h-4 text-cyan-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+            </svg>
+            현장 시나리오 즉시 실행
+          </h2>
+          
+          <button id="btn-scenario-ask" class="scenario-btn btn-ask-border">
+            <div class="flex items-center justify-between">
+              <span class="font-medium text-amber-300">① 검사 임계값 변경 (Write/High Risk)</span>
+              <span class="scenario-tag bg-amber-500/20 text-amber-400 border-amber-500/40">Decision::Ask</span>
+            </div>
+            <p class="text-xs text-industrial-muted mt-1">임계값을 0.80에서 0.95로 변경 시도 -> 작업자 승인 팝업 유발</p>
+          </button>
+
+          <button id="btn-scenario-allow" class="scenario-btn btn-allow-border">
+            <div class="flex items-center justify-between">
+              <span class="font-medium text-emerald-300">② 최근 불량 통계 조회 (Read/Low Risk)</span>
+              <span class="scenario-tag bg-emerald-500/20 text-emerald-400 border-emerald-500/40">Decision::Allow</span>
+            </div>
+            <p class="text-xs text-industrial-muted mt-1">최근 1시간 검사 결과 및 불량률 조회 -> 즉시 실행</p>
+          </button>
+
+          <button id="btn-scenario-deny" class="scenario-btn btn-deny-border">
+            <div class="flex items-center justify-between">
+              <span class="font-medium text-rose-300">③ 감사 로그 강제 초기화 (Destructive/Forbidden)</span>
+              <span class="scenario-tag bg-rose-500/20 text-rose-400 border-rose-500/40">Decision::Deny</span>
+            </div>
+            <p class="text-xs text-industrial-muted mt-1">보안 정책 위반 금지 도구 호출 -> 즉시 차단 및 감사 기록</p>
+          </button>
+        </div>
+
+        <!-- Registered Tools Catalog -->
+        <div class="bg-industrial-panel border border-industrial-border rounded-xl p-4 flex-1 flex flex-col min-h-0">
+          <h2 class="text-sm font-semibold text-white mb-2 flex items-center justify-between">
+            <span>ToolRegistry 활성 도구</span>
+            <span class="text-xs font-mono text-industrial-muted">Coverage: Tier-G</span>
+          </h2>
+          <div id="tools-list" class="flex-1 overflow-y-auto space-y-2 pr-1">
+            <!-- Tool items populated by JS -->
+          </div>
+        </div>
+      </div>
+
+      <!-- Right Column: Agent Chat & Audit Trail (7 cols) -->
+      <div class="col-span-7 flex flex-col gap-4 min-h-0">
+        <!-- Agent Chat Interaction Box -->
+        <div class="bg-industrial-panel border border-industrial-border rounded-xl flex flex-col h-72 min-h-0">
+          <div class="h-10 border-b border-industrial-border px-4 flex items-center justify-between shrink-0 bg-industrial-darker/50">
+            <span class="text-xs font-semibold text-white flex items-center gap-2">
+              <span class="w-2 h-2 rounded-full bg-blue-400"></span>
+              Agent Conversation Stream
+            </span>
+            <span class="text-xs text-industrial-muted">Inference: OpenAI Compatible / llama.cpp</span>
+          </div>
+
+          <!-- Messages Stream -->
+          <div id="chat-messages" class="flex-1 p-4 overflow-y-auto space-y-3 font-sans text-sm">
+            <div class="chat-msg chat-assistant">
+              <span class="chat-sender text-emerald-400 font-semibold">Cogito++ Agent</span>
+              <p>안녕하세요. 제조 설비 AI 에이전트 코어가 대기 중입니다. 작업지시 또는 설비 조회 명령을 입력하세요.</p>
+            </div>
+          </div>
+
+          <!-- Chat Input Form -->
+          <form id="chat-form" class="p-3 border-t border-industrial-border bg-industrial-darker/30 flex gap-2">
+            <input id="chat-input" type="text" placeholder="자연어로 설비 명령을 입력하세요 (예: 불량 임계값 0.95로 변경해줘)..."
+              class="flex-1 bg-industrial-dark border border-industrial-border rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-emerald-500">
+            <button type="submit" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-sm font-medium transition-colors">
+              전송
+            </button>
+          </form>
+        </div>
+
+        <!-- Audit Trail Table -->
+        <div class="bg-industrial-panel border border-industrial-border rounded-xl flex-1 flex flex-col min-h-0">
+          <div class="h-10 border-b border-industrial-border px-4 flex items-center justify-between shrink-0 bg-industrial-darker/50">
+            <div class="flex items-center gap-2">
+              <svg class="w-4 h-4 text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+              </svg>
+              <span class="text-xs font-semibold text-white">암호학적 감사 저널 (Audit Hash Chain)</span>
+            </div>
+            <div class="flex items-center gap-2">
+              <span class="text-xs px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 font-mono">
+                Chain: Verified 🔒
+              </span>
+            </div>
+          </div>
+
+          <div class="flex-1 overflow-x-auto overflow-y-auto">
+            <table class="w-full text-left text-xs">
+              <thead class="bg-industrial-darker/80 text-industrial-muted font-mono sticky top-0 border-b border-industrial-border">
+                <tr>
+                  <th class="py-2 px-3">Seq</th>
+                  <th class="py-2 px-3">Turn</th>
+                  <th class="py-2 px-3">Event / Tool</th>
+                  <th class="py-2 px-3">Verdict</th>
+                  <th class="py-2 px-3">Action Digest</th>
+                  <th class="py-2 px-3">Latency</th>
+                </tr>
+              </thead>
+              <tbody id="audit-table-body" class="divide-y divide-industrial-border/40 font-mono">
+                <!-- Populated by JS -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- §12-8 HMI Approval Modal Dialog (Hidden by default, shown when Decision::Ask occurs) -->
+    <div id="approval-modal" class="hidden fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      <div id="approval-authority-card" class="bg-industrial-panel border-2 border-amber-500/80 rounded-2xl w-full max-w-2xl max-h-[700px] flex flex-col shadow-2xl shadow-amber-500/10 overflow-hidden">
+        
+        <!-- Modal Header -->
+        <div class="bg-amber-500/10 border-b border-amber-500/30 px-6 py-4 flex items-center justify-between shrink-0">
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400">
+              <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+                <line x1="12" y1="9" x2="12" y2="13"></line>
+                <line x1="12" y1="17" x2="12.01" y2="17"></line>
+              </svg>
+            </div>
+            <div>
+              <h3 class="text-base font-bold text-white tracking-wide">작업자 승인 요청 (PermissionGate: Ask)</h3>
+              <p class="text-xs text-amber-300">고위험 설비 쓰기 명령이 감지되어 실행이 보류되었습니다.</p>
+            </div>
+          </div>
+          <span class="text-xs px-2.5 py-1 rounded bg-amber-500/20 text-amber-300 font-mono border border-amber-500/40">
+            Pending Approval
+          </span>
+        </div>
+
+        <!-- Modal Body (Authority Area) -->
+        <div class="p-6 flex-1 overflow-y-auto space-y-4">
+          <!-- Metadata Badges -->
+          <div class="grid grid-cols-3 gap-3">
+            <div class="bg-industrial-darker p-3 rounded-lg border border-industrial-border">
+              <span class="text-xs text-industrial-muted block">Target Tool</span>
+              <span id="modal-tool-name" class="font-mono text-sm font-semibold text-white">opcua.set_inspection_threshold</span>
+            </div>
+            <div class="bg-industrial-darker p-3 rounded-lg border border-industrial-border">
+              <span class="text-xs text-industrial-muted block">Risk & Effect</span>
+              <span class="text-xs font-bold text-rose-400 bg-rose-500/20 px-1.5 py-0.5 rounded border border-rose-500/40">Risk: HIGH</span>
+              <span class="text-xs font-bold text-amber-400 bg-amber-500/20 px-1.5 py-0.5 rounded border border-amber-500/40 ml-1">Effect: WRITE</span>
+            </div>
+            <div class="bg-industrial-darker p-3 rounded-lg border border-industrial-border">
+              <span class="text-xs text-industrial-muted block">Reason Code</span>
+              <span id="modal-reason-code" class="font-mono text-xs text-cyan-300">approval_required</span>
+            </div>
+          </div>
+
+          <!-- Parameter Diff Viewer -->
+          <div class="bg-industrial-darker rounded-xl border border-industrial-border overflow-hidden">
+            <div class="px-4 py-2 bg-industrial-border/30 border-b border-industrial-border flex items-center justify-between text-xs">
+              <span class="font-semibold text-white">설비 파라미터 변경 사항 (Before vs Requested Diff)</span>
+              <span class="text-industrial-muted font-mono">idempotency: conditional</span>
+            </div>
+            <div class="grid grid-cols-2 divide-x divide-industrial-border font-mono text-xs p-3">
+              <div>
+                <span class="text-emerald-400 font-semibold mb-1 block">현재 설비 설정 (Before):</span>
+                <pre id="diff-before" class="text-emerald-300/90 whitespace-pre-wrap">{ "threshold": 0.80, "line": "Line-3A" }</pre>
+              </div>
+              <div class="pl-3">
+                <span class="text-amber-400 font-semibold mb-1 block">요청된 변경값 (Requested):</span>
+                <pre id="diff-requested" class="text-amber-300 whitespace-pre-wrap font-bold">{ "threshold": 0.95, "line": "Line-3A" }</pre>
+              </div>
+            </div>
+          </div>
+
+          <!-- Action Digest Hash -->
+          <div class="bg-industrial-darker/60 px-4 py-2 rounded-lg border border-industrial-border/60 flex items-center justify-between text-xs">
+            <span class="text-industrial-muted">Action Digest (SHA-256):</span>
+            <span id="modal-action-digest" class="font-mono text-industrial-accent">e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855</span>
+          </div>
+        </div>
+
+        <!-- §12-8 Compliant Modal Footer: Touch Target >= 56px, Button Gap >= 24px -->
+        <div class="bg-industrial-darker border-t border-industrial-border px-8 py-5 flex items-center justify-end gap-6 shrink-0">
+          <button id="btn-modal-reject" class="h-14 min-w-[140px] px-6 rounded-xl font-bold text-sm bg-rose-600/20 text-rose-300 border-2 border-rose-500 hover:bg-rose-600 hover:text-white transition-all flex items-center justify-center gap-2 active:scale-95">
+            <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+            거부 (Reject)
+          </button>
+
+          <button id="btn-modal-approve" class="h-14 min-w-[140px] px-8 rounded-xl font-bold text-sm bg-emerald-600 text-white border-2 border-emerald-400 hover:bg-emerald-500 shadow-lg shadow-emerald-600/30 transition-all flex items-center justify-center gap-2 active:scale-95">
+            <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <polyline points="20 6 9 17 4 12"></polyline>
+            </svg>
+            승인 및 실행 (Approve)
+          </button>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
