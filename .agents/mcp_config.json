@@ -1,0 +1,14 @@
+﻿{
+  "mcpServers": {
+    "playwright": {
+      "command": "npx",
+      "args": ["-y", "@executeautomation/playwright-mcp-server"],
+      "description": "Headless browser automation server for verifying web UI rendering, capturing screenshots, and asserting zero CSP violations."
+    },
+    "sqlite-audit-inspector": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-sqlite", "--db-path", "tools/mock_server/audit_mock.db"],
+      "description": "Direct inspection and validation tool for hash-chain audit SQLite database fixtures."
+    }
+  }
+}

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Cogito++ Stage Owner"
+  short_description: "Own one ticket through independent acceptance"
+  default_prompt: "Use $cogito-stage-owner to implement one approved Cogito++ ticket with tests, independent acceptance, and any applicable stage Exit Gate."
