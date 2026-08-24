@@ -1,62 +1,55 @@
 {
-  "version": 1,
+  "version": 2,
   "guard_contract": {
     "algorithm": "longest_prefix",
     "case_sensitive": false,
     "separator": "/",
-    "directory_prefix_suffix": "/",
-    "special_root_prefixes": ["Cogito++_"],
-    "fallback_owner": "shared"
+    "fallback_owner": "deny"
   },
-  "description": "Cogito++ 3-AI 파일 소유권 단일 소스. Claude Code / Codex / Antigravity 의 각 가드가 이 파일만 읽는다. 규칙을 바꾸려면 여기만 고친다.",
-  "matching": "경로는 저장소 루트 기준 상대경로, 구분자는 '/'. 아래 rules 를 '가장 긴 prefix 우선'으로 평가하고 첫 일치의 owner 를 적용한다. 일치가 없으면 owner = 'shared'.",
+  "description": "Cogito++ Gemini-Codex 2-Agent ownership policy. Gemini owns prompts and contracts; Codex owns implementation and tests.",
   "owners": {
-    "claude": "계약 관리자 · 감사관 — 헤더 계약, 명세, ADR, config 스키마",
-    "codex": "구현 엔진 — C++ 구현/테스트, 빌드 시스템",
-    "antigravity": "프론트엔드 · 시각 검증 — 대시보드, mock 서버, 브라우저 E2E",
-    "shared": "소유자 없음 — 정확한 경로에 대한 사용자 승인 후에만 쓰기 가능"
+    "gemini": "Prompt, architecture, specification, public-header contract, configuration schema",
+    "codex": "All implementation, build, automation, and tests including web and browser tests"
   },
   "rules": [
-    { "prefix": "include/", "owner": "claude" },
-    { "prefix": "docs/", "owner": "claude" },
-    { "prefix": "config/", "owner": "claude" },
-    { "prefix": ".claude/", "owner": "claude" },
-    { "prefix": "CLAUDE.md", "owner": "claude" },
-    { "prefix": "Cogito++_", "owner": "claude" },
+    { "prefix": ".agents/skills/cogito-stage-owner/", "owner": "codex" },
+    { "prefix": "include/", "owner": "gemini" },
+    { "prefix": "docs/", "owner": "gemini" },
+    { "prefix": "config/", "owner": "gemini" },
+    { "prefix": ".agents/", "owner": "gemini" },
+    { "prefix": "GEMINI.md", "owner": "gemini" },
+    { "prefix": "README.md", "owner": "gemini" },
+    { "prefix": "LICENSE", "owner": "gemini" },
+    { "prefix": "NOTICE", "owner": "gemini" },
+    { "prefix": "THIRD_PARTY_LICENSES.md", "owner": "gemini" },
+    { "prefix": "SECURITY.md", "owner": "gemini" },
+    { "prefix": "CONTRIBUTING.md", "owner": "gemini" },
+    { "prefix": "CODE_OF_CONDUCT.md", "owner": "gemini" },
 
-    { "prefix": ".codex/", "owner": "codex", "guard_owner": "codex-control" },
-    { "prefix": "AGENTS.md", "owner": "codex", "guard_owner": "codex-control" },
-    { "prefix": "src/", "owner": "codex", "guard_owner": "codex-product" },
-    { "prefix": "cmake/", "owner": "codex", "guard_owner": "codex-product" },
-    { "prefix": "tools/cli/", "owner": "codex", "guard_owner": "codex-product" },
-    { "prefix": "tools/web_host/", "owner": "codex", "guard_owner": "codex-product" },
-    { "prefix": "bindings/", "owner": "codex", "guard_owner": "codex-product" },
-    { "prefix": "tests/", "owner": "codex", "guard_owner": "codex-product" },
-    { "prefix": "CMakeLists.txt", "owner": "codex", "guard_owner": "codex-product" },
-    { "prefix": "CMakePresets.json", "owner": "codex", "guard_owner": "codex-product" },
-    { "prefix": "vcpkg.json", "owner": "codex", "guard_owner": "codex-product" },
-    { "prefix": "vcpkg-configuration.json", "owner": "codex", "guard_owner": "codex-product" },
-
-    { "prefix": ".agents/skills/cogito-stage-owner/", "owner": "codex", "guard_owner": "codex-control" },
-    { "prefix": "tests/web/", "owner": "antigravity" },
-    { "prefix": "tools/web_dashboard/", "owner": "antigravity" },
-    { "prefix": "tools/mock_server/", "owner": "antigravity" },
-    { "prefix": ".agents/", "owner": "antigravity" }
+    { "prefix": ".codex/", "owner": "codex" },
+    { "prefix": "AGENTS.md", "owner": "codex" },
+    { "prefix": "src/", "owner": "codex" },
+    { "prefix": "tests/", "owner": "codex" },
+    { "prefix": "cmake/", "owner": "codex" },
+    { "prefix": "tools/", "owner": "codex" },
+    { "prefix": "bindings/", "owner": "codex" },
+    { "prefix": "scripts/", "owner": "codex" },
+    { "prefix": ".github/", "owner": "codex" },
+    { "prefix": ".gitignore", "owner": "codex" },
+    { "prefix": ".gitattributes", "owner": "codex" },
+    { "prefix": ".editorconfig", "owner": "codex" },
+    { "prefix": ".clang-format", "owner": "codex" },
+    { "prefix": ".clang-tidy", "owner": "codex" },
+    { "prefix": "CMakeLists.txt", "owner": "codex" },
+    { "prefix": "CMakePresets.json", "owner": "codex" },
+    { "prefix": "vcpkg.json", "owner": "codex" },
+    { "prefix": "vcpkg-configuration.json", "owner": "codex" }
   ],
-  "amendment_2026_08_21": {
-    "added": [".codex/ -> codex", "AGENTS.md -> codex", "CLAUDE.md -> claude"],
-    "reason": "교차 감사에서 이 세 경로가 어떤 규칙에도 없어 fallback 인 'shared' 로 떨어졌다. 실측 결과 Claude 와 Antigravity 가 .codex/stage-state.json 을 쓸 수 있었고, 그 파일이 Codex 의 G0 게이트·커밋·push 권한을 결정한다. 각 에이전트의 제어 평면을 그 에이전트에게 귀속시키는 것은 경계 '변경'이 아니라 누락된 경계의 '완성'으로 판단해 반영했다.",
-    "needs_human_ruling": [
-      ".codex/stage-state.json 을 human-write-only 로 따로 뺄 것인가. 현재는 codex 가 자기 게이트 상태를 스스로 쓸 수 있다(자기 승인).",
-      "artifacts/ 의 소유자. 현재 규칙이 없어 shared 로 떨어진다."
-    ]
-  },
   "notes": [
-    "tests/ 는 codex, tests/web/ 는 antigravity — 더 긴 prefix 가 이긴다.",
-    ".agents/ 는 antigravity, .agents/skills/cogito-stage-owner/ 만 codex — 더 긴 prefix 가 이긴다.",
-    "각 에이전트의 제어 평면(.claude/ .codex/ .agents/ 와 CLAUDE.md AGENTS.md)은 해당 에이전트 소유다. 남의 제어 평면을 고치면 그 에이전트가 모르는 사이에 운영 규칙이 바뀐다.",
-    "저장소 루트의 Cogito++_*.md 명세 문서는 claude 소유다. 다른 AI 가 명세를 고치면 3자 계약이 조용히 갈라진다.",
-    "소유자가 아닌 AI 가 문제를 발견하면 파일을 고치지 말고 체크리스트 §1-2 형식의 이슈로 인계한다.",
-    "scripts/ 는 shared 다. 각 AI 의 가드 어댑터가 여기 함께 살지만 정확한 사용자 승인 경로 없이는 쓰지 않는다."
+    "The user's explicit instruction overrides this routing table.",
+    "Matching is case-insensitive because the primary workspace is on Windows.",
+    "Unknown repository paths are denied until assigned to Gemini or Codex.",
+    "Gemini supplies prompts and contracts. Codex implements and runs all tests, including dashboard, mock-server, and browser suites.",
+    "The cogito-stage-owner skill remains Codex-owned inside the Gemini control directory."
   ]
 }

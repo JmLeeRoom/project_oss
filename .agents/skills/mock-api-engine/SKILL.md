@@ -8,7 +8,7 @@ description: >-
 
 # Mock API Engine Skill
 
-This skill allows Antigravity to run a standalone mock backend in `tools/mock_server` that mirrors the exact behavior of `cogito_abi` and the embedded web host.
+This skill allows Codex to implement and run a standalone mock backend in `tools/mock_server` against the Gemini-owned API contract. It mirrors the expected behavior of `cogito_abi` and the embedded web host.
 
 ## Supported Endpoints & Scenarios (§12-5)
 

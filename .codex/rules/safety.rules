@@ -49,7 +49,7 @@ prefix_rule(
 prefix_rule(
     pattern = ["git", "push", "origin", ["main", "master"]],
     decision = "forbidden",
-    justification = "Direct pushes to protected branches are forbidden. Open a reviewed PR from codex/<ticket>-<slug>.",
+    justification = "Direct pushes to protected branches are forbidden. Open a reviewed PR from a Codex task branch.",
     match = ["git push origin main", "git push origin master"],
     not_match = ["git push origin codex/s1-05-ccj"],
 )

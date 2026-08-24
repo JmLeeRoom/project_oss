@@ -100,7 +100,7 @@ async function testWebSocketRejection() {
 
 async function runBrowserVerification() {
   console.log('================================================================');
-  console.log(' Cogito++ Antigravity Browser & Safety Verification Suite');
+  console.log(' Cogito++ Codex Browser & Safety Verification Suite');
   console.log(' - G0-33: Strict CSP Verification (Zero Violations)');
   console.log(' - §12-8: Industrial HMI Layout & Touch Target Verification');
   console.log(' - Target Viewport: 1024 x 768 (No Scroll Authority Area)');

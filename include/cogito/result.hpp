@@ -2,7 +2,7 @@
 // Cogito++ — 오류·결과 계약
 //
 // 규범 근거 : Cogito++_구현명세서.md §4-1, §3-4
-// G0 결정   : G0-09 (docs/g0/G0-RESOLUTION-9.md ③)
+// G0 결정   : G0-09 (S0/S1 구현 기준 한정 승인 완료)
 //
 // [G0-09 확정 규칙]
 //   R1. 무값 성공을 반환하는 공개 API 는 `Error` 를 쓴다. `Result<void>` 를 쓰지 않는다.
@@ -12,10 +12,6 @@
 //       ToolInvoker 가 자체적으로 잡는다. 감사 경로의 OOM 은 fail-closed.
 //   R4. 실패 Result 에서 value() 를 호출하면 Release 에서도 std::terminate 로 중단한다.
 //       assert 에 의존하지 않는다. 조용한 UB 를 남기지 않는다.
-//
-// ⚠ 선반영 고지 — 이 파일은 G0-RESOLUTION-9 의 **Proposed** 결정을 선반영한
-//    초안이며 승인 전에는 규범이 아니다. 승인 전까지 이 헤더를 구현 기준으로 인계하지 않는다.
-//    승인 시 이 고지를 제거한다. (docs/STATUS-AUDIT-2026-08-24.md §2-⑥)
 #ifndef COGITO_RESULT_HPP
 #define COGITO_RESULT_HPP
 

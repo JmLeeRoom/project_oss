@@ -2,11 +2,7 @@
 // Cogito++ — 식별자와 다이제스트 타입
 //
 // 규범 근거 : Cogito++_구현명세서.md §4-2, §6-1, §7-4
-// G0 결정   : G0-26 (docs/g0/G0-RESOLUTION-9.md ⑦), ADR-0004 D5·D6
-//
-// ⚠ 선반영 고지 — 이 파일은 G0-RESOLUTION-9 / ADR-0004 의 **Proposed** 결정을 선반영한
-//    초안이며 승인 전에는 규범이 아니다. 승인 전까지 이 헤더를 구현 기준으로 인계하지 않는다.
-//    승인 시 이 고지를 제거한다. (docs/STATUS-AUDIT-2026-08-24.md §2-⑥)
+// G0 결정   : G0-26 (Accepted), ADR-0004 D5·D6 (Accepted)
 #ifndef COGITO_IDS_HPP
 #define COGITO_IDS_HPP
 

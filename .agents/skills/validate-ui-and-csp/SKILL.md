@@ -8,7 +8,7 @@ description: >-
 
 # Validate UI and CSP Compliance
 
-This skill defines the step-by-step workflow for Antigravity to visually and programmatically verify the Cogito++ Web Dashboard against safety and security invariants.
+This skill defines the step-by-step workflow for Codex to visually and programmatically verify the Cogito++ Web Dashboard against Gemini-owned safety and security acceptance criteria.
 
 ## Verification Checklist
 

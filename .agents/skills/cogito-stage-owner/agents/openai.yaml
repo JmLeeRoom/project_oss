@@ -1,4 +1,4 @@
 interface:
-  display_name: "Cogito++ Stage Owner"
-  short_description: "Own one ticket through independent acceptance"
-  default_prompt: "Use $cogito-stage-owner to implement one approved Cogito++ ticket with tests, independent acceptance, and any applicable stage Exit Gate."
+  display_name: "Cogito++ Implementation Owner"
+  short_description: "Implement Cogito++ changes with proportional tests"
+  default_prompt: "Use $cogito-stage-owner to implement this Cogito++ change from the current Gemini contract and verify it with risk-proportional tests."
