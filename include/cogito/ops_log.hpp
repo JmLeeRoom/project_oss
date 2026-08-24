@@ -11,6 +11,10 @@
 //   OpsLogger    : 디버깅용. 회전·드롭·레벨 필터 허용. 실패해도 실행을 막지 않는다.
 //
 //   운영 로그의 회전이나 드롭이 감사 기록에 영향을 주어서는 안 된다(요구사항 §4).
+//
+// ⚠ 선반영 고지 — 이 파일은 G0-RESOLUTION-9 의 **Proposed** 결정을 선반영한
+//    초안이며 승인 전에는 규범이 아니다. 승인 전까지 이 헤더를 구현 기준으로 인계하지 않는다.
+//    승인 시 이 고지를 제거한다. (승인 상태: docs/g0/G0-LEDGER.md)
 #ifndef COGITO_OPS_LOG_HPP
 #define COGITO_OPS_LOG_HPP
 
@@ -60,7 +64,13 @@ class OpsLogger {
   void Warn(const std::string& m, const std::string& d = {}) {
     if (IsEnabled(LogLevel::Warn)) Log(LogLevel::Warn, m, d);
   }
-  void Error(const std::string& m, const std::string& d = {}) {
+  // ⚠ 이름이 `Error` 가 아니라 `LogError` 인 이유 — 멤버 함수 `Error` 는 클래스 유효범위에서
+  //   타입 `cogito::Error`(result.hpp)를 **가린다.** 그러면 OpsLogger 를 상속한 어떤 클래스도
+  //   클래스 본문 안에서 `Error Flush();` 같은 선언을 쓸 수 없다:
+  //     error: 'Error' does not name a type
+  //   헤더 집합 자체는 컴파일되므로 구현을 시작하기 전에는 드러나지 않는다.
+  //   `cogito::Error` 로 정규화하면 우회되지만, 그 규칙을 모든 파생 클래스가 기억해야 한다.
+  void LogError(const std::string& m, const std::string& d = {}) {
     if (IsEnabled(LogLevel::Error)) Log(LogLevel::Error, m, d);
   }
   // Critical 은 레벨 필터를 거치지 않는다. 봉인 실패·프로세스 중단 직전에 쓴다.

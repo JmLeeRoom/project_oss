@@ -1,98 +1,174 @@
-﻿# Cogito++ — Antigravity PreToolUse 소유권 가드
-#
-# ★ 이 스크립트는 scripts/ownership-policy.json 을 '읽는다'. 규칙을 복제하지 않는다.
-#   이전 버전은 4개 패턴(src/, include/, tests/core/, CMakeLists.txt)만 하드코딩해서
-#   docs/**, config/**, .claude/**, Cogito++_*.md 를 전부 allow 했다.
-#   실측 결과 Antigravity 가 명세서·ADR·Claude 훅 설정까지 덮어쓸 수 있었다.
-#   세 에이전트의 가드가 각자 규칙을 복제하면 반드시 갈라진다 — 정책 파일 하나만 본다.
-#
-# 입력 : Antigravity PreToolUse payload (stdin JSON)
-#          {"toolCall":{"name":"write_to_file","args":{"TargetFile":"..."}}}
-#        ※ Claude Code 는 스키마가 다르다(tool_name / tool_input.file_path).
-#          정책만 공유하고 어댑터는 도구별로 둔다. Claude 쪽은 .claude/hooks/cc_guard.py.
-# 출력 : {"decision":"deny","reason":"..."} 또는 {"decision":"allow"}
+# Cogito++ Gemini write-scope guard.
+# Every write-capable call must expose exact paths owned by Gemini.
 
 $ErrorActionPreference = 'Stop'
-$AllowedOwners = @('antigravity', 'shared')
+$AllowedOwner = 'gemini'
 
 function Write-Decision {
     param([string]$Decision, [string]$Reason)
-    $o = @{ decision = $Decision }
-    if ($Reason) { $o['reason'] = $Reason }
-    ($o | ConvertTo-Json -Compress)
+    $value = @{ decision = $Decision }
+    if ($Reason) { $value.reason = $Reason }
+    $value | ConvertTo-Json -Compress
     exit 0
 }
 
-# ── 입력 파싱 ────────────────────────────────────────────────────────────────
-$raw = $null
-try { $raw = [Console]::In.ReadToEnd() } catch { }
-if (-not $raw) { Write-Decision 'allow' $null }
-
-$inputJson = $null
-try { $inputJson = $raw | ConvertFrom-Json } catch { Write-Decision 'allow' $null }
-
-$toolName = $null
-$target = $null
-if ($inputJson.toolCall) {
-    $toolName = $inputJson.toolCall.name
-    if ($inputJson.toolCall.args) { $target = $inputJson.toolCall.args.TargetFile }
-}
-if (-not $target) { Write-Decision 'allow' $null }
-
-# 쓰기 계열 도구만 검사한다
-if ($toolName -and ($toolName -notmatch 'write|replace|edit|create|delete|remove')) {
-    Write-Decision 'allow' $null
+function Get-NamedValue {
+    param($Value, [string[]]$Names)
+    if ($null -eq $Value) { return $null }
+    foreach ($name in $Names) {
+        $property = $Value.PSObject.Properties[$name]
+        if ($null -ne $property -and $null -ne $property.Value) { return $property.Value }
+    }
+    return $null
 }
 
-# ── 정책 로드 (fail-closed) ──────────────────────────────────────────────────
-$repoRoot = Split-Path -Parent $PSScriptRoot
-$policyPath = Join-Path $repoRoot 'scripts/ownership-policy.json'
+function Test-ReparseChain {
+    param([string]$AbsolutePath, [string]$RootPath)
 
-if (-not (Test-Path $policyPath)) {
-    Write-Decision 'deny' ("[가드 오류] scripts/ownership-policy.json 을 찾을 수 없습니다. " +
-        "소유권 경계를 확인할 수 없으므로 fail-closed 합니다. 정책 파일을 복구하십시오.")
-}
+    $cursor = $AbsolutePath
+    while (-not (Test-Path -LiteralPath $cursor)) {
+        $parent = [IO.Directory]::GetParent($cursor)
+        if ($null -eq $parent) { return $true }
+        $cursor = $parent.FullName
+    }
 
-$policy = $null
-try {
-    $policy = (Get-Content -Path $policyPath -Raw -Encoding UTF8) | ConvertFrom-Json
-} catch {
-    Write-Decision 'deny' ("[가드 오류] ownership-policy.json 파싱 실패 — 경계를 확인할 수 없으므로 fail-closed 합니다.")
-}
-if (-not $policy.rules) {
-    Write-Decision 'deny' "[가드 오류] ownership-policy.json 에 rules 가 없습니다. fail-closed 합니다."
-}
-
-# ── 경로 정규화 (저장소 루트 기준 상대경로, 구분자 '/') ──────────────────────
-$normalized = $target -replace '\\', '/'
-$rootNorm = ($repoRoot -replace '\\', '/').TrimEnd('/')
-$rel = $null
-
-if ($normalized.ToLower().StartsWith($rootNorm.ToLower() + '/')) {
-    $rel = $normalized.Substring($rootNorm.Length + 1)
-} elseif ([System.IO.Path]::IsPathRooted($normalized)) {
-    Write-Decision 'allow' $null       # 저장소 밖 (임시 디렉터리 등)
-} else {
-    $rel = $normalized
-    while ($rel.StartsWith('./')) { $rel = $rel.Substring(2) }
-}
-
-# ── 가장 긴 prefix 우선 ──────────────────────────────────────────────────────
-$owner = 'shared'
-$bestLen = -1
-foreach ($rule in $policy.rules) {
-    $p = $rule.prefix -replace '\\', '/'
-    if (($rel -eq $p) -or ($rel.StartsWith($p))) {
-        if ($p.Length -gt $bestLen) {
-            $bestLen = $p.Length
-            $owner = $rule.owner
-        }
+    while ($true) {
+        try { $item = Get-Item -LiteralPath $cursor -Force } catch { return $true }
+        if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { return $true }
+        if ($cursor.Equals($RootPath, [StringComparison]::OrdinalIgnoreCase)) { return $false }
+        $parent = [IO.Directory]::GetParent($cursor)
+        if ($null -eq $parent) { return $true }
+        $cursor = $parent.FullName
+        if (-not $cursor.StartsWith($RootPath, [StringComparison]::OrdinalIgnoreCase)) { return $true }
     }
 }
 
-if ($AllowedOwners -contains $owner) { Write-Decision 'allow' $null }
+$raw = ''
+try { $raw = [Console]::In.ReadToEnd() } catch { }
+if ([string]::IsNullOrWhiteSpace($raw)) {
+    Write-Decision 'deny' '[guard] empty write payload.'
+}
 
-Write-Decision 'deny' ("[역할 경계] '$rel' 의 소유자는 '$owner' 입니다. " +
-    "Antigravity 는 tools/web_dashboard/**, tools/mock_server/**, tests/web/**, .agents/** 만 씁니다. " +
-    "파일을 고치지 말고 체크리스트 1-2 형식의 이슈로 $owner 에게 인계하십시오. " +
-    "경계 자체를 바꿔야 한다면 scripts/ownership-policy.json 을 사람 승인 아래 먼저 수정합니다.")
+try { $payload = $raw | ConvertFrom-Json } catch {
+    Write-Decision 'deny' '[guard] invalid write payload.'
+}
+
+$toolCall = Get-NamedValue $payload @('toolCall', 'tool_call')
+$toolName = [string](Get-NamedValue $toolCall @('name', 'tool_name'))
+$arguments = Get-NamedValue $toolCall @('args', 'arguments', 'input')
+if ([string]::IsNullOrWhiteSpace($toolName)) {
+    $toolName = [string](Get-NamedValue $payload @('tool_name', 'toolName'))
+    $arguments = Get-NamedValue $payload @('tool_input', 'toolInput')
+}
+
+$writeToolPattern = '^(?i:write|write_file|write_to_file|replace|replace_in_file|replace_file_content|edit|create|create_file|delete|delete_file|remove|remove_file|move|move_file|apply_patch)$'
+if ($toolName -notmatch $writeToolPattern) {
+    Write-Decision 'deny' '[guard] unrecognized write-capable tool.'
+}
+if ($toolName -match '^(?i:apply_patch)$') {
+    Write-Decision 'deny' '[guard] Gemini apply_patch calls are not exact-path reviewable; use a file-targeted tool.'
+}
+if ($null -eq $arguments) {
+    Write-Decision 'deny' '[guard] write payload has no arguments.'
+}
+
+$pathNames = @(
+    'TargetFile', 'file_path', 'path', 'target', 'target_file',
+    'destination', 'destination_path', 'new_path', 'source', 'source_path'
+)
+$targets = [Collections.Generic.List[string]]::new()
+foreach ($name in $pathNames) {
+    $property = $arguments.PSObject.Properties[$name]
+    if ($null -eq $property) { continue }
+    if ($property.Value -is [string] -and -not [string]::IsNullOrWhiteSpace($property.Value)) {
+        $targets.Add([string]$property.Value)
+    }
+}
+if ($targets.Count -eq 0) {
+    Write-Decision 'deny' '[guard] write payload has no exact target path.'
+}
+if ($toolName -match '^(?i:move|move_file)$' -and $targets.Count -lt 2) {
+    Write-Decision 'deny' '[guard] move calls must expose both source and destination.'
+}
+
+$repoRoot = Split-Path -Parent $PSScriptRoot
+$policyPath = Join-Path $repoRoot 'scripts/ownership-policy.json'
+if (-not (Test-Path -LiteralPath $policyPath -PathType Leaf)) {
+    Write-Decision 'deny' '[guard] ownership-policy.json is missing.'
+}
+
+try {
+    $policy = Get-Content -LiteralPath $policyPath -Raw -Encoding UTF8 | ConvertFrom-Json
+} catch {
+    Write-Decision 'deny' '[guard] ownership-policy.json is invalid.'
+}
+
+$ownerNames = @($policy.owners.PSObject.Properties.Name | Sort-Object)
+$contract = $policy.guard_contract
+if (
+    $policy.version -ne 2 -or
+    $ownerNames.Count -ne 2 -or
+    $ownerNames[0] -ne 'codex' -or
+    $ownerNames[1] -ne 'gemini' -or
+    $contract.algorithm -ne 'longest_prefix' -or
+    $contract.case_sensitive -ne $false -or
+    $contract.separator -ne '/' -or
+    $contract.fallback_owner -ne 'deny' -or
+    -not $policy.rules
+) {
+    Write-Decision 'deny' '[guard] ownership policy does not match the fail-closed v2 contract.'
+}
+
+$rootPath = [IO.Path]::GetFullPath($repoRoot).TrimEnd('\', '/')
+foreach ($target in $targets) {
+    try {
+        if ([IO.Path]::IsPathRooted($target)) {
+            $targetPath = [IO.Path]::GetFullPath($target)
+        } else {
+            $targetPath = [IO.Path]::GetFullPath((Join-Path $repoRoot $target))
+        }
+    } catch {
+        Write-Decision 'deny' '[guard] target path is invalid.'
+    }
+
+    if ($targetPath.Equals($rootPath, [StringComparison]::OrdinalIgnoreCase)) {
+        Write-Decision 'deny' '[guard] repository root is not an exact file target.'
+    }
+    if (-not $targetPath.StartsWith($rootPath + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
+        Write-Decision 'deny' '[guard] write target is outside the repository.'
+    }
+    if (Test-ReparseChain $targetPath $rootPath) {
+        Write-Decision 'deny' '[guard] symbolic-link or junction paths are not writable.'
+    }
+
+    $relative = $targetPath.Substring($rootPath.Length + 1).Replace('\', '/')
+    foreach ($component in $relative.Split('/')) {
+        if ([string]::IsNullOrWhiteSpace($component) -or $component.EndsWith('.') -or $component.EndsWith(' ') -or $component.Contains(':')) {
+            Write-Decision 'deny' '[guard] target path contains an unsafe component.'
+        }
+    }
+
+    $owner = [string]$contract.fallback_owner
+    $bestLength = -1
+    foreach ($rule in $policy.rules) {
+        $prefix = ([string]$rule.prefix).Replace('\', '/')
+        if ($rule.owner -notin @('gemini', 'codex')) {
+            Write-Decision 'deny' '[guard] ownership policy contains an invalid owner.'
+        }
+        $matches = if ($prefix.EndsWith('/')) {
+            $relative.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)
+        } else {
+            $relative.Equals($prefix, [StringComparison]::OrdinalIgnoreCase)
+        }
+        if ($matches -and $prefix.Length -gt $bestLength) {
+            $bestLength = $prefix.Length
+            $owner = [string]$rule.owner
+        }
+    }
+
+    if ($owner -ne $AllowedOwner) {
+        Write-Decision 'deny' "[role boundary] '$relative' belongs to $owner; Gemini writes prompts and contracts only."
+    }
+}
+
+Write-Decision 'allow' $null

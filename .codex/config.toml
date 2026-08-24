@@ -35,18 +35,17 @@ config_file = "agents/worker.toml"
 description = "Read-only codebase explorer for bounded evidence gathering."
 config_file = "agents/explorer.toml"
 
-# Explicit declarations keep the roles available on Codex 0.146.x while the
-# standalone .codex/agents discovery format rolls out across clients.
-[agents.contract_auditor]
-description = "Read-only preflight auditor for Cogito++ contract consistency, prerequisites, ownership, and traceability."
+# Optional reviewers for ambiguous or high-risk work. They are not mandatory
+# stage gates.
+[agents.contract_reviewer]
+description = "Optional read-only reviewer for Gemini-authored contracts and implementation scope."
 config_file = "agents/contract-auditor.toml"
 
-[agents.exit_gate_verifier]
-description = "Independent read-only verifier for one ticket's acceptance and any separately applicable Cogito++ stage Exit Gate."
+[agents.implementation_verifier]
+description = "Optional independent read-only verifier for completed implementation work."
 config_file = "agents/exit-gate-verifier.toml"
 
-# Documentation-only MCP. Product/runtime MCP work remains out of scope until
-# G0-15 and its ADR are approved. GitHub metadata keeps using the connected app.
+# Documentation-only MCP. GitHub metadata keeps using the connected app.
 [mcp_servers.openaiDeveloperDocs]
 url = "https://developers.openai.com/mcp"
 enabled = true

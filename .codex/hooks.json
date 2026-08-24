@@ -1,5 +1,5 @@
 {
-  "description": "Cogito++ stage context, ownership, Git safety, and Exit Gate guardrails.",
+  "description": "Cogito++ lightweight Gemini-Codex ownership and Git safety guard.",
   "hooks": {
     "SessionStart": [
       {
@@ -10,7 +10,7 @@
             "command": "python3 -B \"$(git rev-parse --show-toplevel)/.codex/hooks/cogito_hooks.py\"",
             "commandWindows": "powershell.exe -NoLogo -NoProfile -NonInteractive -Command \"$utf8 = [Text.UTF8Encoding]::new($false); [Console]::OutputEncoding = $utf8; $OutputEncoding = $utf8; $hookInput = [Console]::In.ReadToEnd(); $hookPayload = $hookInput | ConvertFrom-Json; $cursor = [IO.DirectoryInfo]::new([string]$hookPayload.cwd); $hookScript = $null; while ($null -ne $cursor) { $candidate = Join-Path $cursor.FullName '.codex\\hooks\\cogito_hooks.py'; if ((Test-Path -LiteralPath $candidate -PathType Leaf) -and (Test-Path -LiteralPath (Join-Path $cursor.FullName 'AGENTS.md') -PathType Leaf) -and (Test-Path -LiteralPath (Join-Path $cursor.FullName '.git'))) { $hookScript = $candidate; break }; $cursor = $cursor.Parent }; if ($null -eq $hookScript) { [Console]::Error.WriteLine('Cogito++ hook script not found from payload cwd'); exit 2 }; $hookInput | & py -3 -B $hookScript; exit $LASTEXITCODE\"",
             "timeout": 10,
-            "statusMessage": "Loading Cogito++ stage context",
+            "statusMessage": "Loading Cogito++ 2-Agent context",
             "additionalContextLimit": 5000
           }
         ]
@@ -33,39 +33,14 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "^(Bash|shell_command|exec_command|apply_patch|Edit|Write)$",
+        "matcher": "^(Bash|bash|shell_command|exec_command|apply_patch|Edit|edit|Write|write|write_file|write_to_file|replace|replace_in_file|replace_file_content|create|create_file|delete|delete_file|remove|remove_file|move|move_file)$",
         "hooks": [
           {
             "type": "command",
             "command": "python3 -B \"$(git rev-parse --show-toplevel)/.codex/hooks/cogito_hooks.py\"",
             "commandWindows": "powershell.exe -NoLogo -NoProfile -NonInteractive -Command \"$utf8 = [Text.UTF8Encoding]::new($false); [Console]::OutputEncoding = $utf8; $OutputEncoding = $utf8; $hookInput = [Console]::In.ReadToEnd(); $hookPayload = $hookInput | ConvertFrom-Json; $cursor = [IO.DirectoryInfo]::new([string]$hookPayload.cwd); $hookScript = $null; while ($null -ne $cursor) { $candidate = Join-Path $cursor.FullName '.codex\\hooks\\cogito_hooks.py'; if ((Test-Path -LiteralPath $candidate -PathType Leaf) -and (Test-Path -LiteralPath (Join-Path $cursor.FullName 'AGENTS.md') -PathType Leaf) -and (Test-Path -LiteralPath (Join-Path $cursor.FullName '.git'))) { $hookScript = $candidate; break }; $cursor = $cursor.Parent }; if ($null -eq $hookScript) { [Console]::Error.WriteLine('Cogito++ hook script not found from payload cwd'); exit 2 }; $hookInput | & py -3 -B $hookScript; exit $LASTEXITCODE\"",
             "timeout": 15,
-            "statusMessage": "Checking Cogito++ scope and Git policy"
-          }
-        ]
-      }
-    ],
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 -B \"$(git rev-parse --show-toplevel)/.codex/hooks/cogito_hooks.py\"",
-            "commandWindows": "powershell.exe -NoLogo -NoProfile -NonInteractive -Command \"$utf8 = [Text.UTF8Encoding]::new($false); [Console]::OutputEncoding = $utf8; $OutputEncoding = $utf8; $hookInput = [Console]::In.ReadToEnd(); $hookPayload = $hookInput | ConvertFrom-Json; $cursor = [IO.DirectoryInfo]::new([string]$hookPayload.cwd); $hookScript = $null; while ($null -ne $cursor) { $candidate = Join-Path $cursor.FullName '.codex\\hooks\\cogito_hooks.py'; if ((Test-Path -LiteralPath $candidate -PathType Leaf) -and (Test-Path -LiteralPath (Join-Path $cursor.FullName 'AGENTS.md') -PathType Leaf) -and (Test-Path -LiteralPath (Join-Path $cursor.FullName '.git'))) { $hookScript = $candidate; break }; $cursor = $cursor.Parent }; if ($null -eq $hookScript) { [Console]::Error.WriteLine('Cogito++ hook script not found from payload cwd'); exit 2 }; $hookInput | & py -3 -B $hookScript; exit $LASTEXITCODE\"",
-            "timeout": 60,
-            "statusMessage": "Checking Exit Gate evidence"
-          }
-        ]
-      }
-    ],
-    "SessionEnd": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 -B \"$(git rev-parse --show-toplevel)/.codex/hooks/cogito_hooks.py\"",
-            "commandWindows": "powershell.exe -NoLogo -NoProfile -NonInteractive -Command \"$utf8 = [Text.UTF8Encoding]::new($false); [Console]::OutputEncoding = $utf8; $OutputEncoding = $utf8; $hookInput = [Console]::In.ReadToEnd(); $hookPayload = $hookInput | ConvertFrom-Json; $cursor = [IO.DirectoryInfo]::new([string]$hookPayload.cwd); $hookScript = $null; while ($null -ne $cursor) { $candidate = Join-Path $cursor.FullName '.codex\\hooks\\cogito_hooks.py'; if ((Test-Path -LiteralPath $candidate -PathType Leaf) -and (Test-Path -LiteralPath (Join-Path $cursor.FullName 'AGENTS.md') -PathType Leaf) -and (Test-Path -LiteralPath (Join-Path $cursor.FullName '.git'))) { $hookScript = $candidate; break }; $cursor = $cursor.Parent }; if ($null -eq $hookScript) { [Console]::Error.WriteLine('Cogito++ hook script not found from payload cwd'); exit 2 }; $hookInput | & py -3 -B $hookScript; exit $LASTEXITCODE\"",
-            "timeout": 3
+            "statusMessage": "Checking Gemini-Codex ownership and Git safety"
           }
         ]
       }

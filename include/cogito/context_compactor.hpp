@@ -8,6 +8,10 @@
 //   축약이 일어나면 다음 추론의 프롬프트가 달라지고, 그러면 실행 경로가 달라진다.
 //   그래서 compactor 버전이 §10-1 골든 리플레이 키의 구성요소다.
 //   버전이 바뀌면 골든이 '깨져야' 한다 — 조용히 통과하면 재현성이 거짓이 된다.
+//
+// ⚠ 선반영 고지 — 이 파일은 G0-RESOLUTION-9 의 **Proposed** 결정을 선반영한
+//    초안이며 승인 전에는 규범이 아니다. 승인 전까지 이 헤더를 구현 기준으로 인계하지 않는다.
+//    승인 시 이 고지를 제거한다. (승인 상태: docs/g0/G0-LEDGER.md)
 #ifndef COGITO_CONTEXT_COMPACTOR_HPP
 #define COGITO_CONTEXT_COMPACTOR_HPP
 
