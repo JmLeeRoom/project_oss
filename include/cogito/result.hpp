@@ -12,6 +12,10 @@
 //       ToolInvoker 가 자체적으로 잡는다. 감사 경로의 OOM 은 fail-closed.
 //   R4. 실패 Result 에서 value() 를 호출하면 Release 에서도 std::terminate 로 중단한다.
 //       assert 에 의존하지 않는다. 조용한 UB 를 남기지 않는다.
+//
+// ⚠ 선반영 고지 — 이 파일은 G0-RESOLUTION-9 의 **Proposed** 결정을 선반영한
+//    초안이며 승인 전에는 규범이 아니다. 승인 전까지 이 헤더를 구현 기준으로 인계하지 않는다.
+//    승인 시 이 고지를 제거한다. (docs/STATUS-AUDIT-2026-08-24.md §2-⑥)
 #ifndef COGITO_RESULT_HPP
 #define COGITO_RESULT_HPP
 

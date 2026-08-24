@@ -1,12 +1,10 @@
-﻿{
+{
   "name": "cogito-mock-server",
   "version": "1.0.0",
   "type": "module",
-  "description": "Mock API and WebSocket Server for Cogito++ Web Dashboard (§12-5)",
+  "description": "Mock API Server for Cogito++ Web Dashboard (§12-5, SSE only, no WebSocket)",
   "scripts": {
-    "start": "node src/server.js"
-  },
-  "dependencies": {
-    "ws": "^8.18.0"
+    "start": "node src/server.js",
+    "test": "node ../../tests/web/csp-and-hmi.test.js"
   }
 }
