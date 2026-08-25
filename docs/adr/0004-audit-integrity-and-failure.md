@@ -234,9 +234,7 @@ D4 는 안전 요구사항이지 이식성 요구사항이 아니다.
 ## 미결
 
 - **D4 (a)/(b) 중 무엇을 규범으로 할지** — 3-컴파일러 비교 결과가 나온 뒤 이 ADR 을 갱신한다
-- **`config_digest` 의 `*_ref` 처리** — 참조 문자열(`env:NAME`)만 넣기로 했으나,
-  같은 참조가 다른 값을 가리키면 digest 가 같아진다. 비밀값을 넣을 수는 없으므로
-  "설정 파일의 형태가 같으면 같은 digest" 라는 의미로 한정함을 문서에 명시할 것
+- **`config_digest` 의 `*_ref` 및 `file:` 투영 확정 (Accepted)** — 비밀값 원문 및 배포 머신 고유 절대 경로를 배제하고, `env:NAME`, `wincred:TARGET`, `keyring:SERVICE/USER` 및 `file:<redacted>` (Shape-only projection)로 투영한다. "설정 파일의 토폴로지/형태가 같으면 동일 호스트 간 재현 가능한 동일 digest"로 확정 승인한다.
 - **`Observe` 에서 `tool_result` 커밋이 실패한 경우** — 이미 설비 write 는 일어났는데
   턴이 `Failed` 로 끝난다. 감사에 "성공한 write 가 있으나 결과 기록 실패" 상태를
   어떻게 남길지 별도 규범 필요 (ADR-0001 미결과 동일 사안)

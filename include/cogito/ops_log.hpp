@@ -2,7 +2,7 @@
 // Cogito++ — 운영 로그 (감사와 완전히 분리된 계층)
 //
 // 규범 근거 : Cogito++_구현명세서.md §4-12, §7-5, §12-3
-// G0 결정   : G0-25 (docs/g0/G0-RESOLUTION-9.md ⑥)
+// G0 결정   : G0-25 (Accepted)
 //
 // ★ OpsLogger 는 AuditJournal 이 아니다. 절대 섞지 않는다.
 //
@@ -11,10 +11,6 @@
 //   OpsLogger    : 디버깅용. 회전·드롭·레벨 필터 허용. 실패해도 실행을 막지 않는다.
 //
 //   운영 로그의 회전이나 드롭이 감사 기록에 영향을 주어서는 안 된다(요구사항 §4).
-//
-// ⚠ 선반영 고지 — 이 파일은 G0-RESOLUTION-9 의 **Proposed** 결정을 선반영한
-//    초안이며 승인 전에는 규범이 아니다. 승인 전까지 이 헤더를 구현 기준으로 인계하지 않는다.
-//    승인 시 이 고지를 제거한다. (승인 상태: docs/g0/G0-LEDGER.md)
 #ifndef COGITO_OPS_LOG_HPP
 #define COGITO_OPS_LOG_HPP
 

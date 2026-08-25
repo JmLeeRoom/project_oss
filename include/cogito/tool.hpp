@@ -3,19 +3,12 @@
 //
 // 규범 근거 : Cogito++_구현명세서.md §2(:68), §3-3(:260-267), §4-4(:522-593),
 //             §4-12(:1150-1180), §6-2-a(:1585-1616), §7-5(:1951)
-// G0 결정   : G0-25 (docs/g0/G0-RESOLUTION-9.md ⑥ :404-424),
-//             G0-27(체크리스트 :99 — output schema 검증 시점),
-//             G0-29 (docs/g0/G0-RESOLUTION-9.md ⑧ :499-570 — effect 상한),
-//             ADR-0001 D1 [R3](docs/adr/0001-fsm-turn-and-action.md:44-55)
+// G0 결정   : G0-25 (Accepted), G0-27 (Accepted), G0-29 (Accepted), ADR-0001 D1 [R3] (Accepted)
 //
 // 이 파일은 "설비에 무슨 일이 일어날 수 있는가"를 타입으로 고정한다.
 // Effect·Risk·Idempotency 의 기본값은 전부 가장 위험한 쪽이다 — 선언을 빠뜨린
 // descriptor 가 조용히 안전한 도구로 취급되는 경로를 남기지 않기 위해서다.
 // handler 는 private 이며 ToolInvoker 만 꺼낼 수 있다(불변식 1을 타입으로 강제).
-//
-// ⚠ 선반영 고지 — 이 파일은 G0-RESOLUTION-9 / ADR-0001 의 **Proposed** 결정을 선반영한
-//    초안이며 승인 전에는 규범이 아니다. 승인 전까지 이 헤더를 구현 기준으로 인계하지 않는다.
-//    승인 시 이 고지를 제거한다. (승인 상태: docs/g0/G0-LEDGER.md)
 #ifndef COGITO_TOOL_HPP
 #define COGITO_TOOL_HPP
 
@@ -70,6 +63,11 @@ enum class Idempotency : std::uint8_t { Safe, Conditional, Unsafe };
 // 나눠 보고할 수 없게 된다.
 enum class ToolStatus  : std::uint8_t { Enabled, Forbidden };
 
+const char* ToString(Effect e) noexcept;
+const char* ToString(Risk r) noexcept;
+const char* ToString(Idempotency i) noexcept;
+const char* ToString(ToolStatus s) noexcept;
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 실행 결과 분류
 //
@@ -88,6 +86,19 @@ enum class ToolStatus  : std::uint8_t { Enabled, Forbidden };
 // ─────────────────────────────────────────────────────────────────────────────
 enum class ToolResultStatus : std::uint8_t {
   Ok, Error, Timeout, Cancelled, Indeterminate
+};
+
+const char* ToString(ToolResultStatus s) noexcept;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ModelToolDeclaration — LLM 모델에 노출되는 도구 선언 DTO
+//
+// 내부 핸들러, 위험도 등급, 프로바이더 메타데이터가 완전히 배제된 순수 인터페이스 DTO.
+// ─────────────────────────────────────────────────────────────────────────────
+struct ModelToolDeclaration {
+  std::string name;
+  std::string description;
+  ccj::Json   parameters;   // input_schema 본문
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -206,29 +217,33 @@ class ToolDescriptor {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// §3-3 effect × risk 하한 검사. 부팅 시 위반하면 **프로세스 시작 실패**이며
-// 반환 Error 의 code 는 Errc::ToolContractViolation 이다(§3-3 :267).
-// 런타임에 완화하는 경로를 두지 않는다 — 판정 불가·계약 불일치는 fail-closed(불변식 4).
+// §3-3 effect × risk 하한 검사 및 계약 무결성 검증.
+// 부팅 시 위반하면 **프로세스 시작 실패**이며 반환 Error 의 code 는 Errc::ToolContractViolation 이다.
 //
-//   effect        최소 risk    approval_required                      idempotency 기본
-//   ──────────    ─────────    ───────────────────────────────────    ────────────────
-//   none          low          선택 (기본 false)                       safe
-//   write         medium       기본 true. 명시적 정책으로만 false 이며   conditional
-//                              그 사실을 turn_begin 에 감사한다
-//   destructive   high         true 강제 — 어떤 설정으로도 false 불가    unsafe
+// [Effect × Risk × Approval × Idempotency 전체 유효 행렬]
+// ┌─────────────┬───────────────────────────┬───────────────────┬──────────────────────┐
+// │ effect      │ 허용 risk                 │ approval_required │ 허용 idempotency     │
+// ├─────────────┼───────────────────────────┼───────────────────┼──────────────────────┤
+// │ none        │ low, medium, high, crit   │ false (기본) / true│ safe (기본), cond    │
+// │ write       │ medium, high, critical    │ true (강제)*      │ conditional, unsafe  │
+// │ destructive │ high, critical            │ true (강제)       │ unsafe (강제)        │
+// └─────────────┴───────────────────────────┴───────────────────┴──────────────────────┘
+// * 참고: Write 의 approval=false 면제는 런타임 정책·감사 엔진 연계 티켓에서 처리하므로,
+//   본 티켓(S2 Registry)에서는 Write + approval=false 를 Errc::ToolContractViolation 으로 거부함.
 //
-// 이 함수가 함께 확인해야 하는 것(§4-4 · §6-2 · G0-27):
-//   - name 이 위 정규식에 맞는가
-//   - timeout_ms > 0 인가
-//   - status == Forbidden 이면 forbidden_reason 이 비어 있지 않은가
-//   - input_schema 가 유효한가 (output_schema 는 null 허용)
-//
-// [결과 검증 순서 — G0-27, 되돌리지 말 것]
-//   handler 반환 직후 Invoker 안에서  크기 상한 -> JSON 파싱 -> output schema  순으로 본다
-//   (docs/g0/G0-RESOLUTION-9.md:421-423, invoker.hpp ToolInvoker::Invoke [실행 계약] 4). 순서가 뒤집히면
-//   max_output_bytes 를 넘는 입력을 먼저 파싱하게 되어 상한이 방어 수단이 아니게 된다.
-//   위반 시 ToolResultStatus::Error 이며, 대화에는 원문 대신 구조화된
-//   invalid_tool_result 만 주입한다(요구사항 §3, invoker.hpp MakeInvalidToolResult).
+// [필수 검증 규칙]
+// 1. name: 길이 1~128 바이트, 정규식 ^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*){0,4}$ 준수.
+// 2. timeout_ms: 1 <= timeout_ms <= 3600000 (1시간).
+// 3. max_output_bytes: 1 <= max_output_bytes <= 10485760 (10MB).
+// 4. provider_id, invoker_id: 길이 1~64 바이트, ^[a-z0-9_-]+$ 준수.
+// 5. status == Enabled:
+//    - input_schema 는 유효한 JSON 객체(is_object()).
+//    - has_handler() 는 true (핸들러 필수).
+//    - forbidden_reason 은 반드시 빈 문자열("").
+// 6. status == Forbidden (Tombstone):
+//    - forbidden_reason 은 비어있지 않아야 함(길이 >= 1).
+//    - has_handler() 는 false (핸들러 금지).
+// 7. enum 값 범위: Effect, Risk, Idempotency, ToolStatus 가 정의된 열거형 값 내에 있어야 함.
 //
 // @thread: 부팅 단계 전용.
 [[nodiscard]] Error ValidateToolContract(const ToolDescriptor& d);

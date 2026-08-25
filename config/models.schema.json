@@ -1,0 +1,51 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "CogitoModelsSchema",
+  "description": "모델 및 가중치 매니페스트 스키마 (Draft-07)",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1
+    },
+    "models": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "provider_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "model_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "weights_sha256": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "chat_template_digest": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "tokenizer_digest": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "quantization": {
+            "type": "string",
+            "maxLength": 32
+          }
+        },
+        "required": ["provider_id", "model_id"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["schema_version", "models"],
+  "additionalProperties": false
+}

@@ -1,0 +1,83 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "CogitoToolManifestSchema",
+  "description": "도구 매니페스트 스키마 (Draft-07)",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1
+    },
+    "tools": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*){0,4}$",
+            "maxLength": 128
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 1024
+          },
+          "effect": {
+            "type": "string",
+            "enum": ["none", "write", "destructive"],
+            "default": "destructive"
+          },
+          "risk": {
+            "type": "string",
+            "enum": ["low", "medium", "high", "critical"],
+            "default": "critical"
+          },
+          "idempotency": {
+            "type": "string",
+            "enum": ["safe", "conditional", "unsafe"],
+            "default": "unsafe"
+          },
+          "approval_required": {
+            "type": "boolean",
+            "default": true
+          },
+          "timeout_ms": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 3600000,
+            "default": 3000
+          },
+          "max_output_bytes": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10485760,
+            "default": 65536
+          },
+          "provider_id": {
+            "type": "string",
+            "pattern": "^[a-z0-9_-]+$",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "invoker_id": {
+            "type": "string",
+            "pattern": "^[a-z0-9_-]+$",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "input_schema": {
+            "type": "object"
+          },
+          "output_schema": {
+            "type": ["object", "null"]
+          }
+        },
+        "required": ["name", "input_schema"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["schema_version", "tools"],
+  "additionalProperties": false
+}

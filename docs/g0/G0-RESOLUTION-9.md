@@ -6,11 +6,11 @@
 | **작성** | Claude (계약 관리자 · 감사관), Gemini (정합화) |
 | **기준일** | 2026-08-21 (2026-08-24 일부 승인) |
 | **원본** | `Cogito++_구현명세서.md` v1.0, `Cogito++_개발_작업체크리스트.md` §2-2 |
-| **상태** | **Partially Accepted — G0-05 · G0-23 · G0-26 사람 승인 완료(2026-08-24).** 나머지 6건(①③⑤⑥⑧⑨)은 사람 승인 대기 |
+| **상태** | **Partially Accepted — G0-05 · G0-23 · G0-26 (2026-08-24), G0-25 · G0-29 (2026-08-25 S2) 사람 승인 완료.** 나머지 4건(①③⑤⑨)은 사람 승인 대기 |
 | **관련 ADR** | `0001-fsm-turn-and-action`(Proposed), `0004-audit-integrity-and-failure`(Accepted) |
 
 > **읽는 법** — 각 항목은 `[모순] → [선택지] → [확정] → [명세 수정 diff] → [영향]` 순이다.
-> **되돌림 불가** 표시가 있던 핵심 3건(G0-05, G0-23, G0-26)은 2026-08-24 사람 승인으로 **Accepted** 되었다.
+> G0-05, G0-23, G0-26 (2026-08-24) 및 G0-25, G0-29 (2026-08-25)는 사람 승인으로 **Accepted** 되었다.
 
 ---
 
@@ -20,15 +20,15 @@
 | --- | --- | --- | --- | --- |
 | ① | G0-01 | ABI **v1.1 단일 기준**. `MAJOR=1 MINOR=1`. §8-2 의 v1.0 시그니처는 명세에서 삭제 | Proposed | 가능 |
 | ② | G0-05 | `operation_digest` 신설(`cogito-operation-v1`). 잠금 키와 멱등 키를 **분리** | **Accepted** | **불가** |
-| ③ | G0-09 | 무값 성공은 `Error` 로 통일. `Result<void>` 특수화는 제네릭 전용. 예외 정책 확정 | Proposed | 가능 |
+| ③ | G0-09 | 무값 성공은 `Error` 로 통일. `Result<void>` 특수화는 제네릭 전용. 예외 정책 확정 | Proposed | S0/S1/S2 한정 승인 |
 | ④ | G0-23 | **골든표가 권위.** 서술 규칙을 C99 `%g`(지수 최소 2자리)로 정정. **+ 골든표 자체의 오류 1행 발견·정정** | **Accepted** | **불가** |
 | ⑤ | G0-24 | 보편 규칙 **R0~R4** 완전 정의. `Idle` 은 R1/R2 대상 아님 | Proposed | 가능 |
-| ⑥ | G0-25 | `invoker.hpp` · `ops_log.hpp` · `context_compactor.hpp` 계약 확정 | Proposed | 가능 |
+| ⑥ | G0-25 | `invoker.hpp` · `ops_log.hpp` · `context_compactor.hpp` · `action.hpp` · `budget.hpp` 계약 확정 | **Accepted** | **S2 한정 승인** |
 | ⑦ | G0-26 | 도메인 태그 **9개**(기존 8 + `kOperation`) + projection 표 확정 | **Accepted** | **불가** |
-| ⑧ | G0-29 | 모드를 숫자 비교하지 않는다. **effect 상한으로 사상 후 최솟값** | Proposed | 가능 |
+| ⑧ | G0-29 | 모드를 숫자 비교하지 않는다. **effect 상한으로 사상 후 최솟값** | **Accepted** | **S2 한정 승인** |
 | ⑨ | G0-31 | 증가 시점 = `AwaitApproval→Gate`(`Event::Approved`). 상한 1. reset 시점 확정 | Proposed | 가능 |
 
-**되돌림 불가 3건(②④⑦)은 2026-08-24 사람 승인 완료되어 S0 및 S1 착수가 허가되었다.**
+**핵심 결정들이 승인되어 S0, S1 및 S2 착수가 허가되었다.**
 
 ---
 

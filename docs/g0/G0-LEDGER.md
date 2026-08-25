@@ -3,15 +3,15 @@
 | | |
 | --- | --- |
 | **목적** | `Cogito++_개발_작업체크리스트.md:109` — "G0-01~G0-33 각각에 owner, 결정일, ADR/이슈 링크를 배정했다" 를 충족할 추적 수단 |
-| **작성** | Claude (계약 관리자 · 감사관) |
-| **기준일** | 2026-08-24 |
-| **원본 대장** | `Cogito++_개발_작업체크리스트.md:71-105` (§2-2 G0 결정 대장) — 번호·차단 등급·요지는 이 표에서 그대로 옮겼다 |
-| **상태** | 이 파일은 **추적표**이며 결정 권위가 없다. 결정 권위는 승인된 ADR 과 `Cogito++_구현명세서.md` 에 있다 |
+| **작성** | Claude (계약 관리자 · 감사관), Gemini (정합화) |
+| **기준일** | 2026-08-25 |
+| **원본 대장** | `Cogito++_개발_작업체크리스트.md:71-105` (§2-2 G0 결정 대장) |
+| **상태** | 이 파일은 **추적표**이며 실제 결정 권위는 승인된 ADR 및 확정된 계약 문서에 있다 |
 
-## 작성 15 / 승인 3 (G0-05 · G0-23 · G0-26) / 미착수 18   (합계 33)
+## 작성 16 / 승인 7 (G0-05, 10, 23, 25, 26, 27, 29) / 미착수 17   (합계 33)
 
-> **2026-08-24 사람 승인 완료:** G0-05(operation_digest 분리), G0-23(C99 %g 골든 표기), G0-26(9개 도메인 태그 및 projection)과 `ADR-0004`가 **Accepted** 되었습니다.
-> 전체 G0 Exit Gate 6개 체크는 미충족 상태로 유지되나, **S0(빌드 시스템) 및 S1(CCJ/Digest/ID)에 한해 제한적 착수가 허가**되었습니다.
+> **사람 승인 완료:** G0-05, G0-10, G0-23, G0-25, G0-26, G0-27, G0-29 및 `ADR-0004`가 **Accepted** 되었습니다.
+> 전체 G0 Exit Gate 6개 체크는 아직 미충족 상태이나, **S0, S1 및 S2(Action/ToolSchema/ToolContract/Registry/Config/Policy/Clock/SecretString) 코어 구현에 한해 단계별 제한적 착수가 허가**되었습니다.
 
 ---
 
@@ -21,14 +21,13 @@
 
 | 상태 | 의미 |
 | --- | --- |
-| `Proposed` | 정정안·ADR 초안이 파일로 존재하나 **사람 승인 대기**. `Resolved` 아님 |
-| `Accepted` | 승인권자가 승인함. 현재 **3건** (G0-05, G0-23, G0-26) |
+| `Proposed` | 정정안·ADR 초안이 파일로 존재하나 **사람 승인 대기**. `Resolved` 아님 (현재 9건) |
+| `Accepted` | 승인권자가 승인함. 현재 **7건** (G0-05, G0-10, G0-23, G0-25, G0-26, G0-27, G0-29) |
 | `Rejected` | 승인권자가 기각함. 현재 0건 |
 | `Out of Scope` | 릴리스 범위에서 명시적으로 제외 확정됨. 현재 0건 |
-| `미착수` | 정정안·ADR 초안이 아직 없음 |
+| `미착수` | 정정안·ADR 초안이 아직 없음 (현재 17건) |
 
-**결정일 열**은 `Accepted` / `Rejected` 로 확정된 날짜만 적는다. 현재 전 항목 `—` 다.
-초안 작성일은 비고에 둔다.
+**결정일 열**은 `Accepted` / `Rejected` 로 확정된 날짜만 적는다. 초안 작성일은 비고에 둔다.
 
 ---
 
@@ -44,8 +43,8 @@
 | G0-06 | 감사 차단 | `RetryFinalize()` 가 원래 `TurnOutcome` 대신 새 Failed outcome 으로 `turn_end` 생성 가능 | 미착수 | 미배정 | 미배정 | — | `SKILL.md:16` 은 ADR 0004 담당이라 하나 실제 0004 는 미포함 → §4 |
 | G0-07 | 동시성 차단 | 실행 중 cancel 명령을 dequeue 할 수 없어 취소 경로가 막힘 | 미착수 | 미배정 | 미배정 | — | 불변식 11 직결. thread model ADR 번호 미배정 |
 | G0-08 | ABI 차단 | `agent_destroy` 가 `void` 인데 wrong-thread 오류 반환 요구, `@thread` 분류 누락 | 미착수 | 미배정 | 미배정 | — | `Cogito++_개발_작업체크리스트.md:176` 이 ADR 기록을 요구하나 번호 미지정 |
-| G0-09 | Core 차단 | 무값 성공용 `Result<void>` 와 예외 허용 범위가 없음 | Proposed | 작성 Claude · 승인 아키텍트 | `docs/g0/G0-RESOLUTION-9.md` ③ | — | 초안 2026-08-21. 되돌림 가능 |
-| G0-10 | Schema 차단 | pattern 200ms 상한 필수인데 C++17 표준 정규식에 안전한 취소/timeout 없음 | Proposed | 작성 Claude · 승인 미배정 | `docs/g0/G0-10-regex-timeout.md` | — | 초안 2026-08-24(동일 워크플로 병렬 작성). ADR 0006 예약(`SKILL.md:18`). 승인자 배정 필요 |
+| G0-09 | Core 차단 | 무값 성공용 `Result<void>` 와 예외 허용 범위가 없음 | Proposed | 작성 Claude · 승인 아키텍트 | `docs/g0/G0-RESOLUTION-9.md` ③ | — | 초안 2026-08-21. S0/S1/S2 한정 승인 |
+| G0-10 | Schema 차단 | pattern 200ms 상한 필수인데 C++17 표준 정규식에 안전한 취소/timeout 없음 | **Accepted** | 아키텍트 | `docs/g0/G0-10-regex-timeout.md` | 2026-08-25 | **S2 착수 한정 승인**. 256B, 복잡도 제한 및 결정론적 스텝 예산 확정 |
 | G0-11 | 빌드 차단 | vcpkg `web` feature 자기 의존·overrides/baseline 조합이 실제 baseline 에서 미검증 | 미착수 | 미배정 | ADR `0002-build-time-adapters` (미작성) | — | 저장소에 `vcpkg.json` 부재(2026-08-24 루트 실측) — 검증 자체가 불가 |
 | G0-12 | 패키지 차단 | 설치 target 이름이 빌드 트리 alias `cogito::core` 와 달라질 수 있음 | 미착수 | 미배정 | ADR `0002-build-time-adapters` (미작성) | — | 저장소에 `CMakeLists.txt` 부재(2026-08-24 루트 실측) |
 | G0-13 | Provider 차단 | llama.cpp 반입/링크 방식·commit SHA·tokenizer digest 대상이 없음 | 미착수 | 제품 책임자 (명세 미지정 — 배정 필요) | 미배정 | — | **AI 결정 불가** (`docs/g0/G0-RESOLUTION-9.md:697`). 공급망 결정은 사람 |
@@ -60,11 +59,11 @@
 | G0-22 | 품질 차단 | CI 공급자·최소 compiler patch·ARM64 방식·release signing 주체 없음 | 미착수 | 제품 책임자 (명세 미지정 — 배정 필요) | ADR `0008-packaging-and-airgap` (미작성) | — | **AI 결정 불가** (`docs/g0/G0-RESOLUTION-9.md:698`) — CI·서명 주체 |
 | G0-23 | 결정론 차단 | CCJ 규칙(`1.5e-7`)과 규범 골든(`1e-07`)의 지수 표기가 상충 | **Accepted** | 아키텍트 | `docs/g0/G0-RESOLUTION-9.md` ④ · `docs/adr/0004-audit-integrity-and-failure.md` | 2026-08-24 | **되돌림 불가**. 승인 순서 권고상 **최우선**(`:683`, `:691`) |
 | G0-24 | FSM 차단 | R1 규범의 AuditError 허용 상태 집합이 본문과 예시에서 다름 | Proposed | 작성 Claude · 승인 아키텍트 | `docs/g0/G0-RESOLUTION-9.md` ⑤ · `docs/adr/0001-fsm-turn-and-action.md` | — | ADR 0001 `:6` 이 G0-24 담당 명시. 되돌림 가능하나 골든 리플레이 픽스처 재생성 필요(`0001:9`) |
-| G0-25 | Core 차단 | `action.hpp`/`budget.hpp`/`permission_gate.hpp` 등 계약 전문 부재 | Proposed | 작성 Claude · 승인 아키텍트 | `docs/g0/G0-RESOLUTION-9.md` ⑥ | — | 원 대장의 종료 증거는 `docs/contracts/core-v1.md`(`체크리스트:97`) — **해당 파일 미생성** |
+| G0-25 | Core 차단 | `action.hpp`/`budget.hpp`/`permission_gate.hpp` 등 계약 전문 부재 | **Accepted** | 아키텍트 | `include/cogito/{action,budget,tool,registry,policy}.hpp` | 2026-08-25 | **S2 착수 한정 승인**. 공개 헤더 계약 확정 |
 | G0-26 | 결정론 차단 | registry/policy/config/model digest 의 포함 필드·누락값·enum 표현 미정의 | **Accepted** | 아키텍트 | `docs/g0/G0-RESOLUTION-9.md` ⑦ · `docs/adr/0004-audit-integrity-and-failure.md` | 2026-08-24 | **되돌림 불가**. ④ 승인 후에만 벡터 확정 가능(`:675`) |
-| G0-27 | 안전 차단 | `output_schema` 의 compile 시점·검증 시점·실패 분류가 없음 | 미착수 | 미배정 | ADR `0006-schema-dialect` (미작성) | — | 안전 차단. ADR 0006 예약(`SKILL.md:18`) |
+| G0-27 | 안전 차단 | `output_schema` 의 compile 시점·검증 시점·실패 분류가 없음 | **Accepted** | 아키텍트 | `include/cogito/tool_schema.hpp` | 2026-08-25 | **S2 착수 한정 승인**. Freeze 시점 컴파일 및 런타임 fail-closed 검증 |
 | G0-28 | 실행 차단 | 동기 Tool handler hard timeout 중단 수단 없음 — 미반환 시 AgentLoop 정지 | 미착수 | 미배정 | ADR `0005-timeout-retry-idempotency` (미작성) | — | ADR 0005 예약(`SKILL.md:17`) |
-| G0-29 | 정책 차단 | `ExecutionMode` enum 이 선형 권한 순서가 아니어서 숫자 min/max 불가 | Proposed | 작성 Claude · 승인 아키텍트 | `docs/g0/G0-RESOLUTION-9.md` ⑧ | — | 초안 2026-08-21. 되돌림 가능 |
+| G0-29 | 정책 차단 | `ExecutionMode` enum 이 선형 권한 순서가 아니어서 숫자 min/max 불가 | **Accepted** | 아키텍트 | `docs/g0/G0-RESOLUTION-9.md` ⑧ · `include/cogito/identity.hpp` | 2026-08-25 | **S2 착수 한정 승인**. ModeToMaxEffect 사상 및 상한 초과 Deny |
 | G0-30 | 승인 차단 | `FindUsable() const` 가 조회 중 만료 판정하나 상태를 변경할 수 없음 | 미착수 | 미배정 | 미배정 | — | ADR 0003 과 인접하나 `SKILL.md` 매핑에 없음 — 배정 필요 |
 | G0-31 | 승인 차단 | `gate_reentry_count` 증가 시점(초기 Ask/승인 Resume/재승인)이 없음 | Proposed | 작성 Claude · 승인 아키텍트 | `docs/g0/G0-RESOLUTION-9.md` ⑨ · `docs/adr/0001-fsm-turn-and-action.md` | — | ADR 0001 `:6` 이 G0-31 담당 명시. 되돌림 가능 |
 | G0-32 | ABI 차단 | C ABI 단순 tool 등록 구조로 output schema·idempotency·상한·ID 전달 불가 | 미착수 | 미배정 | 미배정 | — | G0-01(ABI v1.1 단일 기준) 승인에 종속 — 선행 관계 |
@@ -74,11 +73,11 @@
 
 | 상태 | 건수 | 해당 G0 |
 | --- | --- | --- |
-| `Proposed` | **12** | 01, 09, 10, 17, 18, 19, 20, 21, 24, 25, 29, 31 |
-| `Accepted` | **3** | 05, 23, 26 (2026-08-24 사람 승인 완료) |
+| `Proposed` | **9** | 01, 09, 17, 18, 19, 20, 21, 24, 31 |
+| `Accepted` | **7** | 05, 10, 23, 25, 26, 27, 29 (2026-08-24/25 사람 승인 완료) |
 | `Rejected` | **0** | — |
 | `Out of Scope` | **0** | — |
-| `미착수` | **18** | 02, 03, 04, 06, 07, 08, 11, 12, 13, 14, 15, 16, 22, 27, 28, 30, 32, 33 |
+| `미착수` | **17** | 02, 03, 04, 06, 07, 08, 11, 12, 13, 14, 15, 16, 22, 28, 30, 32, 33 |
 | **합계** | **33** | |
 
 ### 2-2. 차단 등급별 집계
@@ -86,33 +85,33 @@
 | 차단 등급 | 건수 | G0 | Resolved |
 | --- | --- | --- | --- |
 | 전체 차단 | 2 | 01, 02 | 0 |
-| 안전 차단 | 4 | 03, 04, 05, 27 | 1 (G0-05) |
+| 안전 차단 | 4 | 03, 04, 05, 27 | 2 (G0-05, G0-27) |
 | 감사 차단 | 1 | 06 | 0 |
 | Web 차단 | 5 | 17, 18, 19, 20, 33 | 0 |
-| Core 차단 | 2 | 09, 25 | 0 |
+| Core 차단 | 2 | 09, 25 | 1 (G0-25) |
 | ABI 차단 | 2 | 08, 32 | 0 |
 | 결정론 차단 | 2 | 23, 26 | 2 (G0-23, G0-26) |
 | 범위 차단 | 2 | 15, 16 | 0 |
 | 승인 차단 | 2 | 30, 31 | 0 |
-| 동시성 / Schema / 빌드 / 패키지 / Provider / OPC UA / 운영 / 품질 / FSM / 실행 / 정책 차단 | 각 1 (계 11) | 07 / 10 / 11 / 12 / 13 / 14 / 21 / 22 / 24 / 28 / 29 | 0 |
+| 동시성 / Schema / 빌드 / 패키지 / Provider / OPC UA / 운영 / 품질 / FSM / 실행 / 정책 차단 | 각 1 (계 11) | 07 / 10 / 11 / 12 / 13 / 14 / 21 / 22 / 24 / 28 / 29 | 2 (G0-10, G0-29) |
 
 ---
 
-## 3. G0 Exit Gate 충족 현황 (실측) 및 S0/S1 제한 착수
+## 3. G0 Exit Gate 충족 현황 (실측) 및 S0/S1/S2 제한 착수
 
 `Cogito++_개발_작업체크리스트.md:116` — "위 6개 체크가 모두 완료되고 안전 차단 0건일 때만 S0 제품 코드 작업을 시작한다."
 
 | # | 체크(체크리스트 줄) | 충족 | 실측 근거 |
 | --- | --- | --- | --- |
-| 1 | `:109` G0-01~33 각각에 owner·결정일·ADR/이슈 링크 배정 | **진행 중** | 3건 Accepted(2026-08-24 확정), 나머지 배정 진행 중 |
-| 2 | `:110` 모든 "전체/안전/감사 차단" 항목이 `Resolved` | **진행 중** | G0-05 Resolved 완료, 나머지 6건 대기 |
-| 3 | `:111` 보류 항목이 기본 OFF 이고 배포물·SBOM·마케팅 범위에서 제외 | **미충족** | S0 빌드 시스템 구축 시 검증 |
+| 1 | `:109` G0-01~33 각각에 owner·결정일·ADR/이슈 링크 배정 | **진행 중** | 7건 Accepted(2026-08-24/25 확정), 나머지 배정 진행 중 |
+| 2 | `:110` 모든 "전체/안전/감사 차단" 항목이 `Resolved` | **진행 중** | G0-05, G0-27 Resolved 완료, 나머지 5건 대기 |
+| 3 | `:111` 보류 항목이 기본 OFF 이고 배포물·SBOM·마케팅 범위에서 제외 | **미충족** | 빌드 시스템 구축 시 검증 |
 | 4 | `:112` 결정 결과를 명세 후속 버전 또는 승인된 ADR 에 역반영 | **일부 충족** | ADR-0004 Accepted 완료 |
 | 5 | `:113` `docs/traceability.md` 에 요구사항→명세→ADR→작업→테스트 연결 | **미충족** | 후속 티켓 작성 대기 |
-| 6 | `:114` 아키텍트·안전 책임자·보안 책임자·제품 책임자 승인 | **일부 충족** | G0-05, G0-23, G0-26 아키텍트/안전책임자 1차 승인 완료 |
+| 6 | `:114` 아키텍트·안전 책임자·보안 책임자·제품 책임자 승인 | **일부 충족** | G0-05, 10, 23, 25, 26, 27, 29 아키텍트 1차 승인 완료 |
 
-> **[S0/S1 제한 착수 허가 (2026-08-24)]**:
-> 전체 G0 Exit Gate 6개 체크는 아직 미충족 상태이나, 사람(아키텍트/안전책임자)의 2026-08-24 결정으로 되돌림 불가 핵심 3건(G0-05, G0-23, G0-26) 및 ADR-0004가 승인됨에 따라, **S0(빌드 시스템) 및 S1(CCJ v1 / LP Digest / ID) 코어 작업에 한해 제한적 착수가 허가**되었다.
+> **[S0/S1 및 S2 제한 착수 허가 (2026-08-25)]**:
+> 전체 G0 Exit Gate 6개 체크는 아직 미충족 상태이나, 사람(아키텍트/안전책임자)의 승인으로 핵심 7건(G0-05, G0-10, G0-23, G0-25, G0-26, G0-27, G0-29) 및 ADR-0004가 승인됨에 따라, **S0(빌드 시스템), S1(CCJ v1 / LP Digest / ID) 및 S2(Action / Tool Schema / Tool Contract / Registry / Config / Policy / Clock / SecretString) 코어 작업에 한해 제한적 착수가 허가**되었다.
 
 ---
 

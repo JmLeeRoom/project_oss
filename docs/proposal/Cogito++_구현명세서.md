@@ -240,20 +240,28 @@ Tier-G + Tier-V 혼재          -> partial
 
 `partial`·`none` 도구는 **문서·UI·감사 어디에서도 "생성 단계에서 제한됨"이라고 표기하지 않는다.** `grammar_coverage`는 `registry_digest`에 포함되고 `turn_begin` payload에 기록된다.
 
-#### 3-2-a. `pattern` 제약 (🟠H 확정)
+#### 3-2-a. `pattern` 제약 (🟠H 확정 / G0-10 Accepted)
 
 ```
-1. 반드시 ^ 로 시작하고 $ 로 끝난다.            (GBNF 요구와 동일)
-2. 패턴 문자열 길이 <= 256 바이트.
+0. `pattern` 은 Cogito++ 가 허용하는 유일한 정규식 키워드다.
+   `patternProperties` · `propertyNames` · `format` 은 §3-2 금지 목록에 있다.
+1. 반드시 ^ 로 시작하고 $ 로 끝난다. (GBNF 요구와 동일)
+2. 패턴 문자열 길이 <= 256 바이트 (kMaxPatternBytes).
 3. 허용 요소: 리터럴 문자, 문자클래스 [...], . , 이스케이프 \d \w \s \. \\ 등,
              한정 반복 {n,m} (m <= 1024), ? , 그룹 (…) — 캡처 여부 무관.
 4. 금지: 중첩 수량자 ( (…)+ )+ , (…)* 안의 * 또는 + ,
          역참조 \1 , 전방/후방 탐색 (?=…) (?!…) (?<=…) ,
          무한 수량자 * 와 + 는 문자클래스 또는 단일 문자 뒤에서만 허용.
-5. 기동 시 복잡도 검사(중첩 수량자 탐지 + 길이 + 반복 상한)를 수행하고
-   실패하면 프로세스 시작 실패(Errc::SchemaCompileFailed).
-6. 런타임 정규식 매칭에 200ms 상한을 둔다. 초과 시 Deny(reason=pattern_timeout)로
-   처리하고 OpsLogger에 ERROR를 남긴다.
+5. `pattern` 을 가진 프로퍼티는 `maxLength` (<= 65536) 를 반드시 함께 갖는다.
+   없거나 65536 초과 시 Errc::SchemaCompileFailed -> 프로세스 시작 실패.
+6. 기동 시 복잡도 검사를 수행하고 실패하면 프로세스 시작 실패(Errc::SchemaCompileFailed).
+   검사 항목: (a) 앵커 (^...$) (b) 길이 <= 256 (c) 4항 금지 요소 탐지
+             (d) 교대 분기 곱 = Π(교대 그룹의 분기 개수) <= 256
+7. 런타임 매칭에는 벽시계 상한을 두지 않는다. 단일 패턴 평가당 고정된 결정론적 스텝 예산
+   (kPatternMatchStepBudget = 100,000 스텝)을 초과하면 Deny(reason_code=pattern_timeout) +
+   OpsLogger ERROR (Errc::PatternBudgetExhausted).
+8. C++17 std::regex 는 사용하지 않으며 E-A 자체 Thompson NFA 시뮬레이션 매처로 실행한다.
+9. `pattern` 은 상류 스키마 검증기에 위임하지 않고 SchemaCompiler 가 분리해 자체 NFA 매처로 검사한다.
 ```
 
 ### 3-3. `effect` × `risk` 하한 (🟠K 확정)
@@ -307,7 +315,8 @@ enum class Errc : std::int32_t {
   ProviderError, ProviderContractViolation, ToolError, Indeterminate,
   AuditWriteFailed, AuditChainBroken,
   DuplicateKey, NotUtf8, TooLarge, DepthExceeded,
-  ConfigError, SecretError, TurnSealed,
+  ConfigError, SecretError, TurnSealed, WrongThread,
+  PatternBudgetExhausted,
   Internal = 99
 };
 
@@ -624,32 +633,41 @@ class ToolRegistry {
   ~ToolRegistry();
   ToolRegistry(const ToolRegistry&) = delete;
   ToolRegistry& operator=(const ToolRegistry&) = delete;
+  ToolRegistry(ToolRegistry&&) noexcept;
+  ToolRegistry& operator=(ToolRegistry&&) noexcept;
 
-  // 부팅 단계 전용. Freeze() 이후 호출하면 Errc::Internal.
+  // 부팅 단계 전용. Freeze() 이후 호출하면 Errc::TurnSealed.
   [[nodiscard]] Error Register(ToolDescriptor d);
   [[nodiscard]] Error RegisterFrom(ToolProvider& p);
 
-  // 스키마 컴파일 + 계약 검사 + registry_digest 계산. 실패 = 프로세스 시작 실패.
+  // 스키마 컴파일 + 계약 검사 + registry_digest 계산. 실패 = 프로세스 시작 실패 (완전 롤백, 재시도 가능).
   [[nodiscard]] Error Freeze();
   bool frozen() const noexcept { return frozen_; }
 
   // 🔴C·결함7: forbidden 은 tombstone 으로 남아 Absent 와 구분된다.
   LookupResult Lookup(const std::string& name) const noexcept;
 
+  // 컴파일된 입력/출력 스키마 접근자 (ToolInvoker 및 Gate 전용)
+  const CompiledSchema* FindInputSchema(const std::string& tool) const noexcept;
+  const CompiledSchema* FindOutputSchema(const std::string& tool) const noexcept;
+
   // 게이트 3단계. 검증 실패 메시지는 detail 에 담아 LLM 자가수정에 재사용.
   [[nodiscard]] Error ValidateArguments(const std::string& tool,
                                         const ccj::Json& args) const;
 
-  // 모델에 노출할 스키마. 이름 오름차순 고정 정렬 + CCJ 직렬화.
-  // 노출 여부는 사용성 최적화일 뿐 보안 통제가 아니다 — 숨긴 도구도 Gate 는 동일 검사.
-  std::vector<ToolDescriptor> ExportForModel(ExecutionMode mode) const;
+  // 모델에 노출할 스키마 (비공개 핸들러 제외, 이름 오름차순 고정 정렬 + CCJ 직렬화 + 모드별 effect 필터링).
+  std::vector<ModelToolDeclaration> ExportForModel(ExecutionMode mode) const;
 
   const Digest&      registry_digest() const noexcept { return digest_; }
   std::string        export_order_version() const noexcept { return "name-asc-v1"; }
 
+  std::size_t size() const noexcept { return tools_.size(); }
+  bool empty() const noexcept { return tools_.empty(); }
+
  private:
   std::map<std::string, ToolDescriptor> tools_;   // std::map = 이름 정렬 보장
-  std::map<std::string, std::unique_ptr<class CompiledSchema>> schemas_;
+  std::map<std::string, std::unique_ptr<CompiledSchema>> input_schemas_;
+  std::map<std::string, std::unique_ptr<CompiledSchema>> output_schemas_;
   Digest digest_{};
   bool   frozen_ = false;
 };
@@ -1263,44 +1281,57 @@ class AgentLoop {
 }  // namespace cogito
 ```
 
-### 4-13. `config.hpp` — `SecretString` (🟡N 확정)
+### 4-13. `config.hpp` — `CogitoConfig`, `SecretRef` (🟡N 확정)
 
 ```cpp
 #pragma once
+#include <cstdint>
 #include <string>
+#include <map>
 #include "cogito/result.hpp"
+#include "cogito/canonical_json.hpp"
+#include "cogito/digest.hpp"
+#include "cogito/secret_string.hpp"
 
 namespace cogito {
 
 // 참조만 config 에 담는다. 실제 비밀값은 config 파일에 존재하지 않는다.
 //   env:NAME | file:/abs/path | wincred:target | keyring:service/user
-struct SecretRef { std::string uri; };
-
-// 로그·감사·오류 메시지·operator<< 어디에도 값이 새지 않는다.
-class SecretString {
- public:
-  static Result<SecretString> Resolve(const SecretRef& ref);
-  ~SecretString();                                    // 소멸 시 버퍼를 0으로 덮어씀
-  SecretString(const SecretString&) = delete;
-  SecretString& operator=(const SecretString&) = delete;
-  SecretString(SecretString&&) noexcept;
-
-  // 사용 지점을 최소화한다. HTTP 헤더 조립 등 직전에만 호출.
-  const std::string& Expose() const noexcept { return v_; }
-  bool empty() const noexcept { return v_.empty(); }
-
-  // 진단용 — 항상 "***" 를 반환한다.
-  std::string Redacted() const { return "***"; }
-
- private:
-  SecretString() = default;
-  std::string v_;
+struct SecretRef {
+  std::string uri;
+  std::string_view scheme() const noexcept;
+  std::string_view location() const noexcept;
 };
+
+// 비밀값 해석 함수 (fail-closed, 실패 시 Errc::SecretError)
+Result<SecretString> ResolveSecret(const SecretRef& ref);
 
 // file: 참조는 부팅 시 권한을 검사한다.
 //   POSIX: 0600 이 아니거나 그룹/기타 읽기 권한이 있으면 시작 실패
 //   Windows: 현재 사용자 + SYSTEM 외의 ACE 가 있으면 시작 실패
 Error CheckSecretFilePermissions(const std::string& path);
+
+struct EngineConfig {
+  std::uint32_t max_concurrent_sessions = 64;
+  std::uint64_t default_turn_timeout_ms = 30000;
+  std::string   log_level = "info";
+};
+
+struct CogitoConfig {
+  std::uint64_t schema_version = 1;
+  EngineConfig  engine;
+  std::map<std::string, SecretRef> secrets;
+
+  ccj::Json ToNormalizedJson() const;
+  Result<Digest> ComputeDigest() const;
+};
+
+class ConfigLoader {
+ public:
+  static Result<CogitoConfig> FromJson(const ccj::Json& json);
+  static Result<CogitoConfig> FromJsonString(std::string_view json_str);
+  static Result<CogitoConfig> LoadFromFile(const std::string& file_path);
+};
 
 }  // namespace cogito
 ```

@@ -69,6 +69,8 @@ enum class Errc : std::int32_t {
   TurnSealed,
   WrongThread,        // §8-4 [T-1] — agent-loop-only 함수를 다른 스레드에서 호출
 
+  PatternBudgetExhausted,
+
   Internal = 99
 };
 
@@ -145,6 +147,10 @@ struct Error {
   // 진단용. 감사 payload 에 넣을 때는 §7-5 마스킹을 거친다.
   // 비밀값·도구 인자 원문을 여기에 자동으로 담지 않는다(체크리스트 S1-01).
   std::string detail;
+
+  Error() = default;
+  Error(Errc c, std::string r_code = {}, std::string msg = {}, std::string det = {})
+      : code(c), reason_code(std::move(r_code)), message(std::move(msg)), detail(std::move(det)) {}
 
   // 오류가 있으면 true. Error::Ok() 는 false.
   explicit operator bool() const noexcept { return code != Errc::Ok; }
