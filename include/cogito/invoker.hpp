@@ -2,17 +2,11 @@
 // Cogito++ — 도구 실행자
 //
 // 규범 근거 : Cogito++_구현명세서.md §4-12, §6-2-a, §3(불변식 1·9)
-// G0 결정   : G0-25 (docs/g0/G0-RESOLUTION-9.md ⑥), G0-27(output schema 검증 시점)
+// G0 결정   : G0-25 (Accepted), G0-27 (Accepted)
 //             G0-09 규칙 3(예외), G0-24 R3(취소 분류)
 //
 // 불변식 1 — "유효한 미소비 Permit 없이는 Tool handler 에 도달하지 않는다" 를
 // 타입 수준에서 강제하는 지점이다. Gate 밖의 공개 실행 진입점을 만들지 않는다.
-//
-// ⚠ 선반영 고지 — 이 파일은 G0-RESOLUTION-9 의 **Proposed** 결정을 선반영한
-//    초안이며 승인 전에는 규범이 아니다. 승인 전까지 이 헤더를 구현 기준으로 인계하지 않는다.
-//    승인 시 이 고지를 제거한다. (승인 상태: docs/g0/G0-LEDGER.md)
-//    ※ 이 헤더가 참조하는 G0-27(output schema 검증 시점)은 G0-RESOLUTION-9 의 9건에
-//      포함되지 않은 **미해소** 항목이다. 해당 계약은 승인 대기가 아니라 미결이다.
 #ifndef COGITO_INVOKER_HPP
 #define COGITO_INVOKER_HPP
 

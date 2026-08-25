@@ -58,6 +58,7 @@ if(COGITO_ENABLE_ASAN OR COGITO_ENABLE_UBSAN OR COGITO_ENABLE_TSAN)
 endif()
 
 find_package(nlohmann_json 3.12.0 EXACT CONFIG REQUIRED)
+find_package(nlohmann_json_schema_validator 2.4.0 EXACT CONFIG REQUIRED)
 find_package(OpenSSL 3.6.3 EXACT REQUIRED COMPONENTS Crypto)
 find_package(Threads REQUIRED)
 

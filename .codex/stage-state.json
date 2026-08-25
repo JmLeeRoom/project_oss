@@ -1,0 +1,31 @@
+{
+  "ticket": "TICKET-S2-REGISTRY-001",
+  "branch": "codex/ticket-s2-registry-001-implementation",
+  "gate": {
+    "global_g0": "open",
+    "authorization": "limited-s2-registry-start",
+    "contract_auditor": "pass",
+    "stage_exit_gate": "not_evaluated"
+  },
+  "write_allowlist": [
+    "src/tool.cpp",
+    "src/registry.cpp",
+    "tests/tool_test.cpp",
+    "tests/registry_test.cpp",
+    "src/CMakeLists.txt",
+    "tests/CMakeLists.txt"
+  ],
+  "verification_commands": [
+    "cmake --build C:\\CogitoBuild\\project_oss\\registry-gcc-debug --parallel",
+    "ctest --test-dir C:\\CogitoBuild\\project_oss\\registry-gcc-debug --output-on-failure",
+    "cmake --build C:\\CogitoBuild\\project_oss\\registry-gcc-release --parallel",
+    "ctest --test-dir C:\\CogitoBuild\\project_oss\\registry-gcc-release --output-on-failure",
+    "cmake --build /home/yoonsy/cogito-build/registry-clang14-debug-direct --parallel",
+    "ctest --test-dir /home/yoonsy/cogito-build/registry-clang14-debug-direct --output-on-failure --parallel 2",
+    "ASAN_OPTIONS=detect_leaks=1:halt_on_error=1:abort_on_error=1 UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1 ctest --test-dir /home/yoonsy/cogito-build/registry-gcc11-asan-ubsan --output-on-failure --parallel 2",
+    "ASAN_OPTIONS=detect_leaks=1:halt_on_error=1:abort_on_error=1 UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1 /home/yoonsy/cogito-build/registry-gcc11-asan-ubsan/tests/cogito_tests --reporter compact",
+    "git diff --check"
+  ],
+  "evidence_directory": ".codex/verification/TICKET-S2-REGISTRY-001",
+  "verifier_status": "pass"
+}

@@ -1,0 +1,48 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "CogitoEngineConfigSchema",
+  "description": "Cogito++ 코어 엔진 설정 스키마 (Draft-07)",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1
+    },
+    "engine": {
+      "type": "object",
+      "properties": {
+        "max_concurrent_sessions": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65536
+        },
+        "default_turn_timeout_ms": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 3600000
+        },
+        "log_level": {
+          "type": "string",
+          "enum": ["trace", "debug", "info", "warn", "error"]
+        }
+      },
+      "additionalProperties": false
+    },
+    "secrets": {
+      "type": "object",
+      "propertyNames": {
+        "minLength": 1,
+        "maxLength": 128,
+        "pattern": "^[a-zA-Z0-9_.-]+$"
+      },
+      "additionalProperties": {
+        "type": "string",
+        "pattern": "^(env|file|wincred|keyring):.+$",
+        "maxLength": 1024
+      }
+    }
+  },
+  "required": ["schema_version"],
+  "additionalProperties": false
+}

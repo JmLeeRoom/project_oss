@@ -1,7 +1,12 @@
 add_library(cogito_core STATIC
   canonical_json.cpp
+  clock.cpp
   digest.cpp
   ids.cpp
+  secret_string.cpp
+  tool.cpp
+  registry.cpp
+  tool_schema.cpp
 )
 add_library(cogito::core ALIAS cogito_core)
 
@@ -18,6 +23,7 @@ target_link_libraries(cogito_core
   PRIVATE
     OpenSSL::Crypto
     Threads::Threads
+    nlohmann_json_schema_validator::validator
     cogito_warnings
     cogito_sanitizers
 )

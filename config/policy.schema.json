@@ -1,0 +1,79 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "CogitoPolicySchema",
+  "description": "보안 정책 스키마 (Draft-07)",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1
+    },
+    "default": {
+      "type": "string",
+      "enum": ["deny", "ask", "allow"],
+      "default": "deny"
+    },
+    "rules": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "priority": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100000
+          },
+          "tool": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "effect_min": {
+            "type": "string",
+            "enum": ["none", "write", "destructive"]
+          },
+          "effect_max": {
+            "type": "string",
+            "enum": ["none", "write", "destructive"]
+          },
+          "modes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": ["*", "default", "plan", "edit", "readonly"]
+            }
+          },
+          "roles": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            }
+          },
+          "decision": {
+            "type": "string",
+            "enum": ["deny", "ask", "allow"]
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 512
+          },
+          "constraints": {
+            "type": "object"
+          }
+        },
+        "required": ["id", "priority", "tool", "decision"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["schema_version", "default", "rules"],
+  "additionalProperties": false
+}
