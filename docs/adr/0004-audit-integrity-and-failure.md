@@ -147,8 +147,9 @@ operation_digest = SHA-256( LP("cogito-operation-v1") || LP(tool_name) || LP(CCJ
 
 1. **enum 은 숫자가 아니라 고정 소문자 문자열**(`"write"`, `"high"`, `"full"`).
    숫자값은 enum 재정렬 시 조용히 바뀐다.
-2. **누락 optional 필드는 빈 문자열 `""` 로 통일**하고 항상 넣는다.
+2. **누락 optional 필드는 고정 기본값(문자열 `""`, 배열 `[]`, 객체 `{}`)으로 통일**하고 항상 포함한다.
    생략/`null`/`""` 를 섞으면 같은 의미가 다른 digest 를 낸다.
+   Policy 정규화는 10개 고정 필드(`id`, `priority`, `tool`, `decision`, `effect_min`, `effect_max`, `modes`, `roles`, `reason`, `constraints`)를 모두 포함하며, CCJ v1 정규 JSON 객체로 직렬화된다.
 3. **정렬 기준을 명시**한다. registry 는 name 오름차순, policy 는 (priority 내림, rule_id 오름).
    **handler 주소·객체 주소·map 삽입 순서는 절대 포함하지 않는다.**
 

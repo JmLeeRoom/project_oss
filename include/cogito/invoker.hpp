@@ -23,7 +23,7 @@ namespace cogito {
 
 class Clock;
 class ToolRegistry;
-class CancelToken;
+struct CancelToken;
 struct Subject;
 
 // ─────────────────────────────────────────────────────────────────────────────

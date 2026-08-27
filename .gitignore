@@ -1,0 +1,128 @@
+# ==============================================================================
+# Cogito++ Git Ignore Rules
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# 1. CMake & Build Outputs
+# ------------------------------------------------------------------------------
+out/
+build/
+bin/
+lib/
+*.dir/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+CTestTestfile.cmake
+CMakeUserPresets.json
+compile_commands.json
+*.ninja*
+ninja.log
+.ninja_deps
+.ninja_log
+
+# ------------------------------------------------------------------------------
+# 2. vcpkg Dependency Management
+# ------------------------------------------------------------------------------
+vcpkg_installed/
+.vcpkg/
+installed/
+packages/
+
+# ------------------------------------------------------------------------------
+# 3. Compiled Binaries, Objects & Debug Symbols
+# ------------------------------------------------------------------------------
+*.obj
+*.o
+*.lib
+*.a
+*.dll
+*.so
+*.dylib
+*.exe
+*.pdb
+*.ilk
+*.exp
+*.idb
+*.tlog
+*.lastbuildstate
+*.log
+
+# ------------------------------------------------------------------------------
+# 4. Visual Studio / MSVC Artifacts
+# ------------------------------------------------------------------------------
+.vs/
+*.suo
+*.user
+*.userosv
+*.sln.docstates
+*.vcxproj.user
+x64/
+x86/
+ARM/
+ARM64/
+Debug/
+Release/
+RelWithDebInfo/
+MinSizeRel/
+
+# ------------------------------------------------------------------------------
+# 5. IDE & Editor Configurations
+# ------------------------------------------------------------------------------
+# VS Code
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+*.code-workspace
+
+# JetBrains / CLion
+.idea/
+cmake-build-*/
+
+# ------------------------------------------------------------------------------
+# 6. Node.js, Web Dashboard & Headless Browser Testing
+# ------------------------------------------------------------------------------
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.chrome_test_profile/
+test-results/
+playwright-report/
+blob-report/
+coverage/
+.nyc_output/
+
+# ------------------------------------------------------------------------------
+# 7. Agent Temporary Session & Scratch Workspaces
+# ------------------------------------------------------------------------------
+.agents/*/
+!.agents/skills/
+!.agents/rules/
+!.agents/plugins/
+.agents/ORIGINAL_REQUEST.md
+
+# ------------------------------------------------------------------------------
+# 8. OS & Office Temporary Files
+# ------------------------------------------------------------------------------
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+*.tmp
+~*
+~$*
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Linux / Vim / Backup files
+*~
+*.swp
+*.swo

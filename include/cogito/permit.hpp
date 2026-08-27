@@ -16,6 +16,7 @@
 
 #include <cstdint>
 #include <string>
+#include <utility>
 
 #include "cogito/ids.hpp"
 #include "cogito/result.hpp"
@@ -26,17 +27,18 @@ namespace cogito {
 class PermissionGate;   // 유일한 발급자 (명세:1567-1580)
 class ToolInvoker;      // 유일한 소비자 (invoker.hpp ToolInvoker::Invoke)
 
+#if defined(COGITO_TESTING)
+namespace testing {
+struct PermitTestSeam;
+}  // namespace testing
+#endif
+
 // ─────────────────────────────────────────────────────────────────────────────
 // kVerdictTtlNs — Verdict 유효기간 (명세:1463 `v.expires_at_ns = in.now_ns + kVerdictTtlNs`)
 //
-// ⚠ 값 미결. 아키텍트 결정 필요다(ADR-0001 「미결」:159-161).
-//   Verdict TTL 이 승인 대기 시간보다 짧으면 승인해도 항상 만료되므로,
-//   `approval.approval_timeout_ms` 와의 관계가 정해지기 전에는 어떤 값도 임의로 넣지 않는다.
-//   그래서 여기서는 **선언만 한다.** 정의(값)는 결정 후 `src/permit.cpp` 에 둔다.
-//   정의가 없는 동안 이 상수를 쓰는 번역 단위는 링크에 실패한다 — 의도된 fail-closed 다.
-//
-// 소속도 미결이다. Verdict 는 `policy.hpp` 소유(명세:71)이므로 승인 시 그쪽으로 옮길 수 있다.
-// 옮길 때 두 헤더에 값이 서로 다른 정의가 생기지 않도록 선언은 한 곳만 남긴다.
+// [G0-31 / ADR-0001 확정 규약]
+//   Verdict TTL = 60초 (60'000'000'000LL ns).
+//   선언은 이 헤더가 소유하며, 정의(값)는 src/permit.cpp 에 위치한다.
 // ─────────────────────────────────────────────────────────────────────────────
 extern const std::int64_t kVerdictTtlNs;
 
@@ -152,6 +154,9 @@ class ExecutionPermit {
  private:
   friend class PermissionGate;   // 유일한 생성자 (명세:899)
   friend class ToolInvoker;      // 유일한 소비자 (명세:900)
+#if defined(COGITO_TESTING)
+  friend struct testing::PermitTestSeam;  // 단위 테스트용 Seam
+#endif
 
   // 공개 생성 경로를 만들지 마라(불변식 1). Gate 밖에서는 Permit 을 만들 수 없다.
   ExecutionPermit() = default;
@@ -171,6 +176,39 @@ class ExecutionPermit {
 
   bool         consumed_ = false;
 };
+
+// ─────────────────────────────────────────────────────────────────────────────
+// testing::PermitTestSeam — S4 단위 테스트용 발급 Seam
+// ─────────────────────────────────────────────────────────────────────────────
+#if defined(COGITO_TESTING)
+namespace testing {
+struct PermitTestSeam {
+  static ExecutionPermit Create(Digest action_digest,
+                                Digest scope_digest,
+                                std::string tool_name,
+                                std::string idempotency_key,
+                                std::int64_t expires_ns,
+                                std::int32_t timeout_ms,
+                                Effect effect,
+                                bool consumed = false) {
+    ExecutionPermit p;
+    p.action_digest_ = std::move(action_digest);
+    p.scope_digest_ = std::move(scope_digest);
+    p.tool_name_ = std::move(tool_name);
+    p.idem_key_ = std::move(idempotency_key);
+    p.expires_ns_ = expires_ns;
+    p.timeout_ms_ = timeout_ms;
+    p.effect_ = effect;
+    p.consumed_ = consumed;
+    return p;
+  }
+
+  static void Consume(ExecutionPermit& p) noexcept {
+    p.Consume();
+  }
+};
+}  // namespace testing
+#endif
 
 }  // namespace cogito
 

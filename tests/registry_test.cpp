@@ -8,6 +8,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include <string_view>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -302,7 +303,7 @@ TEST_CASE("Freeze reproduces the canonical two-tool registry digest", "[registry
   REQUIRE(registry.frozen());
   REQUIRE(registry.registry_digest().hex() ==
           "31c8148f2e21c391ec41e255d1d6a73749eb7ed1e28dd1264b712a6414bc2612");
-  REQUIRE(registry.export_order_version() == "name-asc-v1");
+  REQUIRE(std::string_view(registry.export_order_version()) == "name-asc-v1");
   REQUIRE(registry.Lookup("calc.add").desc->grammar_coverage == cogito::GrammarCoverage::None);
   REQUIRE(registry.Lookup("fs.delete").desc->grammar_coverage == cogito::GrammarCoverage::None);
   REQUIRE(registry.FindInputSchema("calc.add") != nullptr);

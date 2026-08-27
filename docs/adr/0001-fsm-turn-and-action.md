@@ -1,6 +1,6 @@
 # ADR-0001: 턴·Action 실행 경로의 결정론적 게이트웨이
 
-- **상태**: Proposed
+- **상태**: Accepted
 - **날짜**: 2026-08-21
 - **결정권자**: 아키텍트, 안전 책임자
 - **관련 G0**: G0-24(Cancel/R1 집합), G0-31(재진입 카운터)
@@ -155,10 +155,9 @@ verdict 산출(Gate 1~7)
 
 ---
 
-## 미결
+## 미결 및 후속 확정
 
-- **`kVerdictTtlNs` 의 구체값** — Verdict 유효기간과 승인 대기 시간(`approval_timeout_ms=120000`)의 관계.
-  Verdict TTL 이 승인 대기보다 짧으면 승인해도 항상 만료된다. 아키텍트 결정 필요
+- **`kVerdictTtlNs` 의 구체값 (확정)**: Verdict TTL 은 60초 (`60'000'000'000LL` ns)로 확정한다 (`approval_timeout_ms=120000`과의 관계에서 허가 발급 후 유효 시간으로 동작). `include/cogito/permit.hpp`에서 선언하고 `src/permit.cpp`에서 정의한다.
 - **`Observe` 에서의 `AuditError` 처리 순서** — `tool_result` 커밋 실패 시 R1 로 `Failed` 가 되는데,
   그 시점에 이미 설비 write 는 일어났다. `Failed` 로 끝난 턴에 성공한 write 가 남는 것을
   감사에서 어떻게 표현할지 별도 규범 필요 (ADR-0004 와 연계)
