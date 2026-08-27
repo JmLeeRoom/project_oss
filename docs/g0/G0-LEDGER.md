@@ -8,10 +8,10 @@
 | **원본 대장** | `Cogito++_개발_작업체크리스트.md:71-105` (§2-2 G0 결정 대장) |
 | **상태** | 이 파일은 **추적표**이며 실제 결정 권위는 승인된 ADR 및 확정된 계약 문서에 있다 |
 
-## 작성 16 / 승인 7 (G0-05, 10, 23, 25, 26, 27, 29) / 미착수 17   (합계 33)
+## 작성 16 / 승인 8 (G0-05, 10, 23, 24, 25, 26, 27, 29) / 미착수 17   (합계 33)
 
-> **사람 승인 완료:** G0-05, G0-10, G0-23, G0-25, G0-26, G0-27, G0-29 및 `ADR-0004`가 **Accepted** 되었습니다.
-> 전체 G0 Exit Gate 6개 체크는 아직 미충족 상태이나, **S0, S1 및 S2(Action/ToolSchema/ToolContract/Registry/Config/Policy/Clock/SecretString) 코어 구현에 한해 단계별 제한적 착수가 허가**되었습니다.
+> **사람 승인 완료:** G0-05, G0-10, G0-23, G0-24, G0-25, G0-26, G0-27, G0-29 및 `ADR-0004`, `ADR-0001`(S3 범위)이 **Accepted** 되었습니다.
+> 전체 G0 Exit Gate 6개 체크는 아직 미충족 상태이나, **S0, S1, S2 완료에 이어 S3(FSM 상태기계) 코어 구현에 한해 단계별 제한적 착수가 허가**되었습니다.
 
 ---
 
@@ -21,8 +21,8 @@
 
 | 상태 | 의미 |
 | --- | --- |
-| `Proposed` | 정정안·ADR 초안이 파일로 존재하나 **사람 승인 대기**. `Resolved` 아님 (현재 9건) |
-| `Accepted` | 승인권자가 승인함. 현재 **7건** (G0-05, G0-10, G0-23, G0-25, G0-26, G0-27, G0-29) |
+| `Proposed` | 정정안·ADR 초안이 파일로 존재하나 **사람 승인 대기**. `Resolved` 아님 (현재 8건) |
+| `Accepted` | 승인권자가 승인함. 현재 **8건** (G0-05, G0-10, G0-23, G0-24, G0-25, G0-26, G0-27, G0-29) |
 | `Rejected` | 승인권자가 기각함. 현재 0건 |
 | `Out of Scope` | 릴리스 범위에서 명시적으로 제외 확정됨. 현재 0건 |
 | `미착수` | 정정안·ADR 초안이 아직 없음 (현재 17건) |
@@ -58,14 +58,14 @@
 | G0-21 | 운영 차단 | SQLite migration/versioning·WAL/디스크 임계값·보존/백업/복구 정책 없음 | Proposed | 작성 Claude · 승인 미배정 | `docs/g0/G0-21-storage-migration.md` | — | 초안 2026-08-24(병렬 작성). `SKILL.md:16` 은 ADR 0004 담당이라 하나 실제 0004 는 미포함 → §4 |
 | G0-22 | 품질 차단 | CI 공급자·최소 compiler patch·ARM64 방식·release signing 주체 없음 | 미착수 | 제품 책임자 (명세 미지정 — 배정 필요) | ADR `0008-packaging-and-airgap` (미작성) | — | **AI 결정 불가** (`docs/g0/G0-RESOLUTION-9.md:698`) — CI·서명 주체 |
 | G0-23 | 결정론 차단 | CCJ 규칙(`1.5e-7`)과 규범 골든(`1e-07`)의 지수 표기가 상충 | **Accepted** | 아키텍트 | `docs/g0/G0-RESOLUTION-9.md` ④ · `docs/adr/0004-audit-integrity-and-failure.md` | 2026-08-24 | **되돌림 불가**. 승인 순서 권고상 **최우선**(`:683`, `:691`) |
-| G0-24 | FSM 차단 | R1 규범의 AuditError 허용 상태 집합이 본문과 예시에서 다름 | Proposed | 작성 Claude · 승인 아키텍트 | `docs/g0/G0-RESOLUTION-9.md` ⑤ · `docs/adr/0001-fsm-turn-and-action.md` | — | ADR 0001 `:6` 이 G0-24 담당 명시. 되돌림 가능하나 골든 리플레이 픽스처 재생성 필요(`0001:9`) |
+| G0-24 | FSM 차단 | R1 규범의 AuditError 허용 상태 집합이 본문과 예시에서 다름 | **Accepted** | 아키텍트 | `docs/g0/G0-RESOLUTION-9.md` ⑤ · `docs/adr/0001-fsm-turn-and-action.md` | 2026-08-27 | **S3 착수 승인**. R0~R4 보편 규칙 및 명시 전이표 19개 확정 |
 | G0-25 | Core 차단 | `action.hpp`/`budget.hpp`/`permission_gate.hpp` 등 계약 전문 부재 | **Accepted** | 아키텍트 | `include/cogito/{action,budget,tool,registry,policy}.hpp` | 2026-08-25 | **S2 착수 한정 승인**. 공개 헤더 계약 확정 |
 | G0-26 | 결정론 차단 | registry/policy/config/model digest 의 포함 필드·누락값·enum 표현 미정의 | **Accepted** | 아키텍트 | `docs/g0/G0-RESOLUTION-9.md` ⑦ · `docs/adr/0004-audit-integrity-and-failure.md` | 2026-08-24 | **되돌림 불가**. ④ 승인 후에만 벡터 확정 가능(`:675`) |
 | G0-27 | 안전 차단 | `output_schema` 의 compile 시점·검증 시점·실패 분류가 없음 | **Accepted** | 아키텍트 | `include/cogito/tool_schema.hpp` | 2026-08-25 | **S2 착수 한정 승인**. Freeze 시점 컴파일 및 런타임 fail-closed 검증 |
 | G0-28 | 실행 차단 | 동기 Tool handler hard timeout 중단 수단 없음 — 미반환 시 AgentLoop 정지 | 미착수 | 미배정 | ADR `0005-timeout-retry-idempotency` (미작성) | — | ADR 0005 예약(`SKILL.md:17`) |
 | G0-29 | 정책 차단 | `ExecutionMode` enum 이 선형 권한 순서가 아니어서 숫자 min/max 불가 | **Accepted** | 아키텍트 | `docs/g0/G0-RESOLUTION-9.md` ⑧ · `include/cogito/identity.hpp` | 2026-08-25 | **S2 착수 한정 승인**. ModeToMaxEffect 사상 및 상한 초과 Deny |
 | G0-30 | 승인 차단 | `FindUsable() const` 가 조회 중 만료 판정하나 상태를 변경할 수 없음 | 미착수 | 미배정 | 미배정 | — | ADR 0003 과 인접하나 `SKILL.md` 매핑에 없음 — 배정 필요 |
-| G0-31 | 승인 차단 | `gate_reentry_count` 증가 시점(초기 Ask/승인 Resume/재승인)이 없음 | Proposed | 작성 Claude · 승인 아키텍트 | `docs/g0/G0-RESOLUTION-9.md` ⑨ · `docs/adr/0001-fsm-turn-and-action.md` | — | ADR 0001 `:6` 이 G0-31 담당 명시. 되돌림 가능 |
+| G0-31 | 승인 차단 | `gate_reentry_count` 증가 시점(초기 Ask/승인 Resume/재승인)이 없음 | Proposed | 작성 Claude · 승인 아키텍트 | `docs/g0/G0-RESOLUTION-9.md` ⑨ · `docs/adr/0001-fsm-turn-and-action.md` | — | S4/S5 Permission Gate 소관으로 이관 |
 | G0-32 | ABI 차단 | C ABI 단순 tool 등록 구조로 output schema·idempotency·상한·ID 전달 불가 | 미착수 | 미배정 | 미배정 | — | G0-01(ABI v1.1 단일 기준) 승인에 종속 — 선행 관계 |
 | G0-33 | Web 차단 | `style-src 'self'` CSP 와 React Flow/Recharts inline style 호환성 미검증 | 미착수 | 미배정 | ADR `0009-web-trust-boundary` (미작성) | — | 브라우저 실측은 **Antigravity 소유**(`CLAUDE.md §8`). Claude 는 계약만 |
 
@@ -73,11 +73,12 @@
 
 | 상태 | 건수 | 해당 G0 |
 | --- | --- | --- |
-| `Proposed` | **9** | 01, 09, 17, 18, 19, 20, 21, 24, 31 |
-| `Accepted` | **7** | 05, 10, 23, 25, 26, 27, 29 (2026-08-24/25 사람 승인 완료) |
+| `Proposed` | **8** | 01, 09, 17, 18, 19, 20, 21, 31 |
+| `Accepted` | **8** | 05, 10, 23, 24, 25, 26, 27, 29 (2026-08-24/25/27 사람 승인 완료) |
 | `Rejected` | **0** | — |
 | `Out of Scope` | **0** | — |
 | `미착수` | **17** | 02, 03, 04, 06, 07, 08, 11, 12, 13, 14, 15, 16, 22, 28, 30, 32, 33 |
+| **합계** | **33** | |
 | **합계** | **33** | |
 
 ### 2-2. 차단 등급별 집계

@@ -2,27 +2,18 @@
 // Cogito++ — 턴 실행 상태기계
 //
 // 규범 근거 : Cogito++_구현명세서.md §4-10, §5
-// G0 결정   : G0-24 (docs/g0/G0-RESOLUTION-9.md ⑤), ADR-0001 D1·D5·D6
+// G0 결정   : G0-24 (Accepted — docs/g0/G0-RESOLUTION-9.md ⑤), ADR-0001 D1·D5·D6 (Accepted)
 //
 // 이 파일이 "LLM 의 판단이 행동으로 이어지는 경로"의 유일한 규범이다.
 // 전이는 명시표 19개 + 보편 규칙 R0~R4 가 전부다. 다른 곳에서 상태를 바꾸지 않는다.
 //
-// ⚠ 선반영 고지 — 이 파일은 G0-RESOLUTION-9 / ADR-0001 의 **Proposed** 결정을 선반영한
-//    초안이며 승인 전에는 규범이 아니다. 승인 전까지 이 헤더를 구현 기준으로 인계하지 않는다.
-//    승인 시 이 고지를 제거한다. (승인 상태: docs/g0/G0-LEDGER.md)
-//
-// ⚠⚠ 이 파일은 현행 규범 명세와 **실제로 충돌한다.** 다른 헤더보다 위험도가 높다.
-//     ADR-0001 이 Proposed 이므로 현재 권위는 `Cogito++_구현명세서.md` 다. 그런데:
-//
-//       이 헤더                          | 구현명세서 (현행 규범)
-//       ---------------------------------|------------------------------------------
-//       R0~R4 (5개 규칙)                 | R1/R2/R3 (3개). `grep R0/R4` -> 0 hit
-//       R2 대상에서 Idle 제외            | :972-974 의 R2 에 Idle 이 **포함**
-//       ResetForTestOnly (테스트 전용)   | :1003 ResetForNextTurn() 직접 대입
-//
-//     즉 **헤더를 보고 구현하면 명세 위반, 명세를 보고 구현하면 헤더 위반**이다.
-//     어느 쪽도 통과할 수 없다. Codex 에게 이 헤더를 구현 기준으로 넘기기 전에
-//     ADR-0001 승인(→ 헤더가 규범이 됨) 또는 명세 §4-10·§5 정정이 선행해야 한다.
+// [S3 FSM 공식 규범 확정 (2026-08-27)]:
+// - R0~R4 보편 규칙 및 명시 전이표 19개를 단일 source of truth로 확정.
+// - Idle+Cancel 은 R0 no-op, 종료 상태(Done/Failed/Cancelled) + AuditError/Cancel 은 R4 no-op.
+// - R1(AuditError->Failed) 대상: {Infer, Propose, Gate, AwaitApproval, Execute, Observe}.
+// - R2(Cancel->Cancelled) 대상: {Infer, Propose, Gate, AwaitApproval, Observe}.
+// - R3: Execute 는 Cancel 이벤트를 직접 받지 않으며 CancelToken/ToolResult 로만 Observe 에 진입.
+// - 다음 턴 진입은 Dispatch(StartNextTurn) 로만 수행하며 ResetForTestOnly 는 테스트 전용으로 제한.
 #ifndef COGITO_FSM_HPP
 #define COGITO_FSM_HPP
 
