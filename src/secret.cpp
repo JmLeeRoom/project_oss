@@ -1,19 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
-#if defined(_MSC_VER) && !defined(_CRT_SECURE_NO_WARNINGS)
-#define _CRT_SECURE_NO_WARNINGS
-#endif
-
 #include "cogito/config.hpp"
 
+#include <algorithm>
 #include <array>
-#include <cerrno>
-#include <climits>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 #include <map>
+#include <new>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -25,14 +22,13 @@
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
 #include <windows.h>
 
+#include <accctrl.h>
 #include <aclapi.h>
 #include <wincred.h>
 #else
+#include <cerrno>
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -44,74 +40,78 @@ namespace {
 
 constexpr std::size_t kMaxSecretUriBytes = 1024U;
 constexpr std::size_t kMaxSecretLocationBytes = 1024U;
-constexpr std::size_t kMaxBackendNameBytes = 256U;
+constexpr std::size_t kMaxEnvironmentNameBytes = 256U;
+#if defined(_WIN32)
+constexpr std::size_t kMaxWincredTargetBytes = 256U;
+#endif
 constexpr std::size_t kMaxSecretBytes = 65536U;
-
-Error MakeSecretError(Errc code, const char* message) {
-  return Error{code, code == Errc::TooLarge ? reason::kInputTooLarge : "", message};
-}
+constexpr std::size_t kReadChunkBytes = 4096U;
 
 Error SecretError(const char* message) {
-  return MakeSecretError(Errc::SecretError, message);
+  return Error{Errc::SecretError, {}, message};
 }
 
 Error ForbiddenError(const char* message) {
-  return MakeSecretError(Errc::Forbidden, message);
+  return Error{Errc::Forbidden, {}, message};
 }
 
 Error TooLargeError(const char* message) {
-  return MakeSecretError(Errc::TooLarge, message);
-}
-
-bool ContainsNul(std::string_view value) noexcept {
-  return value.find('\0') != std::string_view::npos;
-}
-
-bool IsSupportedScheme(std::string_view scheme) noexcept {
-  return scheme == "env" || scheme == "file" || scheme == "wincred" ||
-         scheme == "keyring";
-}
-
-Error ValidateSecretUri(const SecretRef& ref) {
-  const std::string_view uri(ref.uri);
-  if (uri.empty() || uri.size() > kMaxSecretUriBytes || ContainsNul(uri) ||
-      uri.find_first_of("\r\n") != std::string_view::npos) {
-    return SecretError("secret reference URI violates its byte constraints");
-  }
-
-  const std::size_t separator = uri.find(':');
-  if (separator == std::string_view::npos || separator == 0U ||
-      separator + 1U >= uri.size() ||
-      !IsSupportedScheme(uri.substr(0U, separator))) {
-    return SecretError("secret reference URI has an unsupported format");
-  }
-  return Error::Ok();
+  return Error{Errc::TooLarge, reason::kInputTooLarge, message};
 }
 
 bool IsAsciiAlpha(char value) noexcept {
   return (value >= 'A' && value <= 'Z') || (value >= 'a' && value <= 'z');
 }
 
-bool IsValidEnvironmentName(std::string_view name) noexcept {
-  if (name.empty() || name.size() > kMaxBackendNameBytes || ContainsNul(name)) {
-    return false;
-  }
-  const char first = name.front();
-  if (!IsAsciiAlpha(first) && first != '_') {
-    return false;
-  }
-  for (const char value : name.substr(1U)) {
-    if (!IsAsciiAlpha(value) && (value < '0' || value > '9') && value != '_') {
-      return false;
-    }
-  }
-  return true;
+bool IsAsciiDigit(char value) noexcept { return value >= '0' && value <= '9'; }
+
+bool HasSupportedScheme(std::string_view scheme) noexcept {
+  return scheme == "env" || scheme == "file" || scheme == "wincred" ||
+         scheme == "keyring";
 }
 
-bool IsValidUtf8(std::string_view value) noexcept {
-  const auto* bytes = reinterpret_cast<const unsigned char*>(value.data());
+bool ContainsRegexLineTerminator(std::string_view text) noexcept {
+  for (std::size_t index = 0U; index < text.size(); ++index) {
+    const unsigned char value = static_cast<unsigned char>(text[index]);
+    if (value == static_cast<unsigned char>('\r') ||
+        value == static_cast<unsigned char>('\n')) {
+      return true;
+    }
+    if (index + 2U < text.size() && value == 0xE2U &&
+        static_cast<unsigned char>(text[index + 1U]) == 0x80U &&
+        (static_cast<unsigned char>(text[index + 2U]) == 0xA8U ||
+         static_cast<unsigned char>(text[index + 2U]) == 0xA9U)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool IsValidSecretUri(std::string_view uri) noexcept {
+  if (uri.empty() || uri.size() > kMaxSecretUriBytes ||
+      uri.find('\0') != std::string_view::npos || ContainsRegexLineTerminator(uri)) {
+    return false;
+  }
+  const std::size_t separator = uri.find(':');
+  return separator != std::string_view::npos && separator != 0U &&
+         separator + 1U < uri.size() && HasSupportedScheme(uri.substr(0U, separator));
+}
+
+bool IsValidEnvironmentName(std::string_view name) noexcept {
+  if (name.empty() || name.size() > kMaxEnvironmentNameBytes ||
+      (!IsAsciiAlpha(name.front()) && name.front() != '_')) {
+    return false;
+  }
+  return std::all_of(name.begin() + 1, name.end(), [](char value) {
+    return IsAsciiAlpha(value) || IsAsciiDigit(value) || value == '_';
+  });
+}
+
+#if defined(_WIN32)
+bool IsValidUtf8(std::string_view text) noexcept {
+  const auto* bytes = reinterpret_cast<const unsigned char*>(text.data());
   std::size_t offset = 0U;
-  while (offset < value.size()) {
+  while (offset < text.size()) {
     const unsigned char lead = bytes[offset];
     if (lead <= 0x7FU) {
       ++offset;
@@ -132,18 +132,16 @@ bool IsValidUtf8(std::string_view value) noexcept {
     } else {
       return false;
     }
-
-    if (continuation_count > value.size() - offset - 1U) {
+    if (continuation_count > text.size() - offset - 1U) {
       return false;
     }
-    for (std::size_t index = 1U; index <= continuation_count; ++index) {
-      const unsigned char continuation = bytes[offset + index];
+    for (std::size_t i = 1U; i <= continuation_count; ++i) {
+      const unsigned char continuation = bytes[offset + i];
       if ((continuation & 0xC0U) != 0x80U) {
         return false;
       }
       code_point = (code_point << 6U) | (continuation & 0x3FU);
     }
-
     if ((continuation_count == 1U && code_point < 0x80U) ||
         (continuation_count == 2U && code_point < 0x800U) ||
         (continuation_count == 3U && code_point < 0x10000U) ||
@@ -155,37 +153,63 @@ bool IsValidUtf8(std::string_view value) noexcept {
   }
   return true;
 }
-
-bool IsAbsoluteSecretPath(std::string_view path) noexcept {
-  if (path.empty() || path.size() > kMaxSecretLocationBytes || ContainsNul(path)) {
-    return false;
-  }
-#if defined(_WIN32)
-  const bool drive_path = path.size() >= 3U && IsAsciiAlpha(path[0]) &&
-                          path[1] == ':' && path[2] == '\\';
-  const bool unc_path = path.size() >= 3U && path[0] == '\\' && path[1] == '\\';
-  return drive_path || unc_path;
-#else
-  return path.front() == '/';
 #endif
-}
 
-void CleanseString(std::string& value) noexcept {
-  if (!value.empty()) {
-    OPENSSL_cleanse(value.data(), value.size());
-  }
-  value.clear();
-}
+class SensitiveBuffer {
+ public:
+  SensitiveBuffer() { bytes_.reserve(kMaxSecretBytes + 1U); }
+  ~SensitiveBuffer() { Cleanse(); }
 
-void TrimOneTrailingNewline(std::string& value) {
-  if (value.size() >= 2U && value[value.size() - 2U] == '\r' &&
-      value.back() == '\n') {
-    OPENSSL_cleanse(value.data() + value.size() - 2U, 2U);
-    value.resize(value.size() - 2U);
-  } else if (!value.empty() && value.back() == '\n') {
-    OPENSSL_cleanse(value.data() + value.size() - 1U, 1U);
-    value.resize(value.size() - 1U);
+  SensitiveBuffer(const SensitiveBuffer&) = delete;
+  SensitiveBuffer& operator=(const SensitiveBuffer&) = delete;
+
+  std::string& bytes() noexcept { return bytes_; }
+
+  SecretString IntoSecret() { return SecretString{std::move(bytes_)}; }
+
+ private:
+  void Cleanse() noexcept {
+    if (!bytes_.empty()) {
+      OPENSSL_cleanse(bytes_.data(), bytes_.size());
+      bytes_.clear();
+    }
   }
+
+  std::string bytes_;
+};
+
+class SensitiveChunk {
+ public:
+  ~SensitiveChunk() { OPENSSL_cleanse(bytes.data(), bytes.size()); }
+
+  SensitiveChunk(const SensitiveChunk&) = delete;
+  SensitiveChunk& operator=(const SensitiveChunk&) = delete;
+  SensitiveChunk() = default;
+
+  std::array<char, kReadChunkBytes> bytes{};
+};
+
+Error NormalizeFileSecret(std::string& secret) noexcept {
+  if (secret.empty()) {
+    return SecretError("the secret file is empty");
+  }
+
+  std::size_t removed = 0U;
+  if (secret.size() >= 2U && secret[secret.size() - 2U] == '\r' &&
+      secret.back() == '\n') {
+    removed = 2U;
+  } else if (secret.back() == '\n') {
+    removed = 1U;
+  }
+  if (removed != 0U) {
+    const std::size_t new_size = secret.size() - removed;
+    OPENSSL_cleanse(secret.data() + new_size, removed);
+    secret.resize(new_size);
+  }
+  if (secret.empty()) {
+    return SecretError("the normalized secret file is empty");
+  }
+  return Error::Ok();
 }
 
 #if defined(COGITO_TESTING)
@@ -194,47 +218,91 @@ thread_local std::map<std::string, SecretString> g_mock_secrets;
 
 #if defined(_WIN32)
 
-class NativeHandle {
+bool IsAbsoluteSecretPath(std::string_view path) noexcept {
+  if (path.empty() || path.size() > kMaxSecretLocationBytes ||
+      path.find('\0') != std::string_view::npos) {
+    return false;
+  }
+  const bool drive_absolute =
+      path.size() >= 3U && IsAsciiAlpha(path[0]) && path[1] == ':' && path[2] == '\\';
+  if (drive_absolute) {
+    return true;
+  }
+  if (path.size() < 5U || path[0] != '\\' || path[1] != '\\' || path[2] == '.' ||
+      path[2] == '?') {
+    return false;
+  }
+  const std::size_t server_end = path.find('\\', 2U);
+  return server_end != std::string_view::npos && server_end > 2U &&
+         server_end + 1U < path.size();
+}
+
+Result<std::wstring> Utf8ToWide(std::string_view text) {
+  if (text.empty() || text.size() > static_cast<std::size_t>(std::numeric_limits<int>::max()) ||
+      !IsValidUtf8(text)) {
+    return SecretError("a Windows secret identifier is not valid UTF-8");
+  }
+  const int input_size = static_cast<int>(text.size());
+  const int required =
+      MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text.data(), input_size, nullptr, 0);
+  if (required <= 0) {
+    return SecretError("a Windows secret identifier could not be converted");
+  }
+  std::wstring result(static_cast<std::size_t>(required), L'\0');
+  if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text.data(), input_size,
+                          result.data(), required) != required) {
+    return SecretError("a Windows secret identifier could not be converted");
+  }
+  return result;
+}
+
+std::wstring ToExtendedFilePath(std::wstring path) {
+  if (path.size() < static_cast<std::size_t>(MAX_PATH)) {
+    return path;
+  }
+  if (path.size() >= 2U && path[0] == L'\\' && path[1] == L'\\') {
+    return L"\\\\?\\UNC\\" + path.substr(2U);
+  }
+  return L"\\\\?\\" + path;
+}
+
+class UniqueHandle {
  public:
-  NativeHandle() = default;
-  explicit NativeHandle(HANDLE handle) noexcept : handle_(handle) {}
-  ~NativeHandle() { Reset(); }
+  explicit UniqueHandle(HANDLE handle = INVALID_HANDLE_VALUE) noexcept : handle_(handle) {}
+  ~UniqueHandle() {
+    if (valid()) {
+      CloseHandle(handle_);
+    }
+  }
 
-  NativeHandle(const NativeHandle&) = delete;
-  NativeHandle& operator=(const NativeHandle&) = delete;
+  UniqueHandle(const UniqueHandle&) = delete;
+  UniqueHandle& operator=(const UniqueHandle&) = delete;
 
-  NativeHandle(NativeHandle&& other) noexcept : handle_(other.Release()) {}
-  NativeHandle& operator=(NativeHandle&& other) noexcept {
+  UniqueHandle(UniqueHandle&& other) noexcept : handle_(other.handle_) {
+    other.handle_ = INVALID_HANDLE_VALUE;
+  }
+  UniqueHandle& operator=(UniqueHandle&& other) noexcept {
     if (this != &other) {
-      Reset();
-      handle_ = other.Release();
+      if (valid()) {
+        CloseHandle(handle_);
+      }
+      handle_ = other.handle_;
+      other.handle_ = INVALID_HANDLE_VALUE;
     }
     return *this;
   }
 
+  bool valid() const noexcept {
+    return handle_ != nullptr && handle_ != INVALID_HANDLE_VALUE;
+  }
   HANDLE get() const noexcept { return handle_; }
 
  private:
-  HANDLE Release() noexcept {
-    const HANDLE released = handle_;
-    handle_ = INVALID_HANDLE_VALUE;
-    return released;
-  }
-
-  void Reset() noexcept {
-    if (handle_ != nullptr && handle_ != INVALID_HANDLE_VALUE) {
-      CloseHandle(handle_);
-    }
-    handle_ = INVALID_HANDLE_VALUE;
-  }
-
-  HANDLE handle_ = INVALID_HANDLE_VALUE;
+  HANDLE handle_;
 };
 
 class LocalSecurityDescriptor {
  public:
-  explicit LocalSecurityDescriptor(PSECURITY_DESCRIPTOR descriptor) noexcept
-      : descriptor_(descriptor) {}
   ~LocalSecurityDescriptor() {
     if (descriptor_ != nullptr) {
       LocalFree(descriptor_);
@@ -243,197 +311,222 @@ class LocalSecurityDescriptor {
 
   LocalSecurityDescriptor(const LocalSecurityDescriptor&) = delete;
   LocalSecurityDescriptor& operator=(const LocalSecurityDescriptor&) = delete;
+  LocalSecurityDescriptor() = default;
+
+  PSECURITY_DESCRIPTOR* out() noexcept { return &descriptor_; }
 
  private:
   PSECURITY_DESCRIPTOR descriptor_ = nullptr;
 };
 
-Result<std::wstring> Utf8ToWide(std::string_view value) {
-  if (value.empty() || value.size() > static_cast<std::size_t>(INT_MAX) ||
-      !IsValidUtf8(value)) {
-    return SecretError("secret backend identifier is not valid UTF-8");
-  }
-  const int input_size = static_cast<int>(value.size());
-  const int required = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, value.data(),
-                                           input_size, nullptr, 0);
-  if (required <= 0) {
-    return SecretError("secret backend identifier is not valid UTF-8");
-  }
-  std::wstring result(static_cast<std::size_t>(required), L'\0');
-  const int converted = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, value.data(),
-                                            input_size, result.data(), required);
-  if (converted != required) {
-    return SecretError("secret backend identifier conversion failed");
-  }
-  return result;
+bool IsWhitelistedSid(PSID sid, PSID current_user, PSID system_sid,
+                      PSID administrators_sid) noexcept {
+  return EqualSid(sid, current_user) != FALSE || EqualSid(sid, system_sid) != FALSE ||
+         EqualSid(sid, administrators_sid) != FALSE;
 }
 
-bool IsAllowedSid(PSID candidate, PSID current_user, PSID system_sid,
-                  PSID administrators_sid) noexcept {
-  return candidate != nullptr && IsValidSid(candidate) != FALSE &&
-         (EqualSid(candidate, current_user) != FALSE ||
-          EqualSid(candidate, system_sid) != FALSE ||
-          EqualSid(candidate, administrators_sid) != FALSE);
+struct AllowedAceView {
+  bool is_allowed = false;
+  ACCESS_MASK mask = 0U;
+  PSID sid = nullptr;
+};
+
+bool ParseAllowedAce(ACE_HEADER* header, AllowedAceView& result) noexcept {
+  result = AllowedAceView{};
+  std::size_t sid_offset = 0U;
+  switch (header->AceType) {
+    case ACCESS_ALLOWED_ACE_TYPE:
+      result.is_allowed = true;
+      sid_offset = offsetof(ACCESS_ALLOWED_ACE, SidStart);
+      break;
+    case ACCESS_ALLOWED_CALLBACK_ACE_TYPE:
+      result.is_allowed = true;
+      sid_offset = offsetof(ACCESS_ALLOWED_CALLBACK_ACE, SidStart);
+      break;
+    case ACCESS_ALLOWED_OBJECT_ACE_TYPE:
+    case ACCESS_ALLOWED_CALLBACK_OBJECT_ACE_TYPE: {
+      result.is_allowed = true;
+      constexpr std::size_t kObjectFlagsOffset = sizeof(ACE_HEADER) + sizeof(ACCESS_MASK);
+      if (header->AceSize < kObjectFlagsOffset + sizeof(DWORD)) {
+        return false;
+      }
+      DWORD flags = 0U;
+      std::memcpy(&flags, reinterpret_cast<const unsigned char*>(header) + kObjectFlagsOffset,
+                  sizeof(flags));
+      sid_offset = kObjectFlagsOffset + sizeof(DWORD);
+      if ((flags & ACE_OBJECT_TYPE_PRESENT) != 0U) {
+        sid_offset += sizeof(GUID);
+      }
+      if ((flags & ACE_INHERITED_OBJECT_TYPE_PRESENT) != 0U) {
+        sid_offset += sizeof(GUID);
+      }
+      break;
+    }
+    default:
+      return true;
+  }
+
+  constexpr std::size_t kMaskOffset = sizeof(ACE_HEADER);
+  constexpr std::size_t kMinimumSidBytes = offsetof(SID, SubAuthority);
+  if (header->AceSize < kMaskOffset + sizeof(ACCESS_MASK) ||
+      header->AceSize < sid_offset + kMinimumSidBytes) {
+    return false;
+  }
+  std::memcpy(&result.mask, reinterpret_cast<const unsigned char*>(header) + kMaskOffset,
+              sizeof(result.mask));
+  result.sid = reinterpret_cast<unsigned char*>(header) + sid_offset;
+  if (IsValidSid(result.sid) == FALSE) {
+    return false;
+  }
+  const DWORD sid_length = GetLengthSid(result.sid);
+  return sid_length <= static_cast<DWORD>(header->AceSize - sid_offset);
 }
 
 Error ValidateWindowsDacl(HANDLE file) {
+  UniqueHandle token;
   HANDLE raw_token = nullptr;
   if (OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &raw_token) == FALSE) {
-    return ForbiddenError("unable to inspect the current process token");
+    return ForbiddenError("the current Windows security identity could not be read");
   }
-  NativeHandle token(raw_token);
+  token = UniqueHandle(raw_token);
 
   DWORD token_bytes = 0U;
-  GetTokenInformation(token.get(), TokenUser, nullptr, 0U, &token_bytes);
+  static_cast<void>(GetTokenInformation(token.get(), TokenUser, nullptr, 0U, &token_bytes));
   if (token_bytes == 0U || GetLastError() != ERROR_INSUFFICIENT_BUFFER) {
-    return ForbiddenError("unable to inspect the current process identity");
+    return ForbiddenError("the current Windows security identity could not be read");
   }
-  std::vector<unsigned char> token_storage(token_bytes);
-  if (GetTokenInformation(token.get(), TokenUser, token_storage.data(), token_bytes,
+  const std::size_t token_units =
+      (static_cast<std::size_t>(token_bytes) + sizeof(std::max_align_t) - 1U) /
+      sizeof(std::max_align_t);
+  std::vector<std::max_align_t> token_buffer(token_units);
+  if (GetTokenInformation(token.get(), TokenUser, token_buffer.data(), token_bytes,
                           &token_bytes) == FALSE) {
-    return ForbiddenError("unable to inspect the current process identity");
+    return ForbiddenError("the current Windows security identity could not be read");
   }
-  auto* token_user = reinterpret_cast<TOKEN_USER*>(token_storage.data());
+  const auto* token_user = reinterpret_cast<const TOKEN_USER*>(token_buffer.data());
   PSID current_user = token_user->User.Sid;
-  if (current_user == nullptr || IsValidSid(current_user) == FALSE) {
-    return ForbiddenError("the current process user SID is invalid");
+  if (IsValidSid(current_user) == FALSE) {
+    return ForbiddenError("the current Windows security identity is invalid");
   }
 
-  alignas(void*) std::array<unsigned char, SECURITY_MAX_SID_SIZE> system_storage{};
-  alignas(void*) std::array<unsigned char, SECURITY_MAX_SID_SIZE> admin_storage{};
+  alignas(SID) std::array<unsigned char, SECURITY_MAX_SID_SIZE> system_storage{};
+  alignas(SID) std::array<unsigned char, SECURITY_MAX_SID_SIZE>
+      administrators_storage{};
   DWORD system_size = static_cast<DWORD>(system_storage.size());
-  DWORD admin_size = static_cast<DWORD>(admin_storage.size());
+  DWORD administrators_size = static_cast<DWORD>(administrators_storage.size());
   PSID system_sid = system_storage.data();
-  PSID administrators_sid = admin_storage.data();
+  PSID administrators_sid = administrators_storage.data();
   if (CreateWellKnownSid(WinLocalSystemSid, nullptr, system_sid, &system_size) == FALSE ||
       CreateWellKnownSid(WinBuiltinAdministratorsSid, nullptr, administrators_sid,
-                         &admin_size) == FALSE) {
-    return ForbiddenError("unable to construct the trusted Windows SIDs");
+                         &administrators_size) == FALSE) {
+    return ForbiddenError("the Windows security whitelist could not be created");
   }
 
   PSID owner = nullptr;
   PACL dacl = nullptr;
-  PSECURITY_DESCRIPTOR raw_descriptor = nullptr;
-  const DWORD security_status = GetSecurityInfo(
-      file, SE_FILE_OBJECT, OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
-      &owner, nullptr, &dacl, nullptr, &raw_descriptor);
-  if (security_status != ERROR_SUCCESS || raw_descriptor == nullptr) {
-    if (raw_descriptor != nullptr) {
-      LocalFree(raw_descriptor);
-    }
-    return ForbiddenError("unable to inspect the secret file DACL");
-  }
-  LocalSecurityDescriptor descriptor(raw_descriptor);
-
-  if (!IsAllowedSid(owner, current_user, system_sid, administrators_sid)) {
-    return ForbiddenError("secret file owner is not trusted");
-  }
-  if (dacl == nullptr) {
-    return ForbiddenError("secret file has a NULL DACL");
+  LocalSecurityDescriptor security_descriptor;
+  const DWORD status = GetSecurityInfo(file, SE_FILE_OBJECT,
+                                       OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
+                                       &owner, nullptr, &dacl, nullptr,
+                                       security_descriptor.out());
+  if (status != ERROR_SUCCESS || owner == nullptr || dacl == nullptr ||
+      IsValidSid(owner) == FALSE ||
+      !IsWhitelistedSid(owner, current_user, system_sid, administrators_sid)) {
+    return ForbiddenError("the secret file owner or DACL is not allowed");
   }
 
-  ACL_SIZE_INFORMATION acl_info{};
-  if (GetAclInformation(dacl, &acl_info, sizeof(acl_info), AclSizeInformation) == FALSE) {
-    return ForbiddenError("unable to enumerate the secret file DACL");
+  ACL_SIZE_INFORMATION acl_information{};
+  if (GetAclInformation(dacl, &acl_information, sizeof(acl_information),
+                        AclSizeInformation) == FALSE) {
+    return ForbiddenError("the secret file DACL could not be inspected");
   }
-
-  constexpr DWORD kReadRights = FILE_READ_DATA | GENERIC_READ | GENERIC_ALL;
-  for (DWORD index = 0U; index < acl_info.AceCount; ++index) {
+  constexpr ACCESS_MASK kReadGrantMask = FILE_READ_DATA | GENERIC_READ | GENERIC_ALL;
+  for (DWORD index = 0U; index < acl_information.AceCount; ++index) {
     void* raw_ace = nullptr;
     if (GetAce(dacl, index, &raw_ace) == FALSE || raw_ace == nullptr) {
-      return ForbiddenError("unable to enumerate the secret file DACL");
+      return ForbiddenError("the secret file DACL contains an invalid ACE");
     }
-    const auto* header = static_cast<const ACE_HEADER*>(raw_ace);
-    if (header->AceType == ACCESS_ALLOWED_ACE_TYPE) {
-      const auto* ace = static_cast<const ACCESS_ALLOWED_ACE*>(raw_ace);
-      if ((ace->Mask & kReadRights) != 0U &&
-          !IsAllowedSid(const_cast<DWORD*>(&ace->SidStart), current_user, system_sid,
-                        administrators_sid)) {
-        return ForbiddenError("secret file grants read access to an untrusted SID");
-      }
-    } else if (header->AceType == ACCESS_ALLOWED_COMPOUND_ACE_TYPE ||
-               header->AceType == ACCESS_ALLOWED_OBJECT_ACE_TYPE ||
-               header->AceType == ACCESS_ALLOWED_CALLBACK_ACE_TYPE ||
-               header->AceType == ACCESS_ALLOWED_CALLBACK_OBJECT_ACE_TYPE) {
-      return ForbiddenError("secret file contains an unsupported access-allow ACE");
+    AllowedAceView ace;
+    if (!ParseAllowedAce(static_cast<ACE_HEADER*>(raw_ace), ace)) {
+      return ForbiddenError("the secret file DACL contains an invalid allow ACE");
+    }
+    if (ace.is_allowed && (ace.mask & kReadGrantMask) != 0U &&
+        !IsWhitelistedSid(ace.sid, current_user, system_sid, administrators_sid)) {
+      return ForbiddenError("the secret file grants read access to an untrusted trustee");
     }
   }
   return Error::Ok();
 }
 
-Error WindowsOpenError(DWORD code) {
-  if (code == ERROR_ACCESS_DENIED || code == ERROR_SHARING_VIOLATION) {
-    return ForbiddenError("access to the secret file was denied");
+Result<UniqueHandle> OpenValidatedSecretFile(std::string_view path) {
+  auto converted = Utf8ToWide(path);
+  if (!converted) {
+    return converted.error();
   }
-  return SecretError("unable to open the secret file");
-}
-
-Result<NativeHandle> OpenValidatedSecretFile(const std::string& path) {
-  auto wide_path = Utf8ToWide(path);
-  if (!wide_path) {
-    return wide_path.error();
-  }
-  const HANDLE raw_file = CreateFileW(wide_path.value().c_str(), GENERIC_READ,
-                                      FILE_SHARE_READ, nullptr, OPEN_EXISTING,
-                                      FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
-  if (raw_file == INVALID_HANDLE_VALUE) {
-    return WindowsOpenError(GetLastError());
-  }
-  NativeHandle file(raw_file);
-
-  BY_HANDLE_FILE_INFORMATION info{};
-  if (GetFileInformationByHandle(file.get(), &info) == FALSE) {
-    return ForbiddenError("unable to inspect the opened secret file");
-  }
-  if ((info.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) !=
-      0U) {
-    return ForbiddenError("secret file is not a regular non-reparse file");
-  }
-  if (Error error = ValidateWindowsDacl(file.get()); error) {
-    return error;
-  }
-  return Result<NativeHandle>{std::move(file)};
-}
-
-Result<SecretString> ReadValidatedSecretFile(NativeHandle& file) {
-  LARGE_INTEGER size{};
-  if (GetFileSizeEx(file.get(), &size) == FALSE || size.QuadPart < 0) {
-    return SecretError("unable to determine the secret file size");
-  }
-  if (size.QuadPart == 0) {
-    return SecretError("secret file is empty");
-  }
-  if (static_cast<unsigned long long>(size.QuadPart) > kMaxSecretBytes) {
-    return TooLargeError("secret file exceeds its byte limit");
-  }
-
-  std::string value(kMaxSecretBytes + 1U, '\0');
-  std::size_t total = 0U;
-  while (total < value.size()) {
-    DWORD count = 0U;
-    const DWORD remaining = static_cast<DWORD>(value.size() - total);
-    if (ReadFile(file.get(), value.data() + total, remaining, &count, nullptr) == FALSE) {
-      CleanseString(value);
-      return SecretError("unable to read the secret file");
+  const std::wstring wide_path = ToExtendedFilePath(std::move(converted).take());
+  UniqueHandle file(CreateFileW(wide_path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
+                                OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
+  if (!file.valid()) {
+    const DWORD error = GetLastError();
+    if (error == ERROR_ACCESS_DENIED || error == ERROR_SHARING_VIOLATION ||
+        error == ERROR_CANT_ACCESS_FILE) {
+      return ForbiddenError("the secret file cannot be opened safely");
     }
-    if (count == 0U) {
+    return SecretError("the secret file could not be opened");
+  }
+
+  if (GetFileType(file.get()) != FILE_TYPE_DISK) {
+    return ForbiddenError("the secret path is not a disk file");
+  }
+  BY_HANDLE_FILE_INFORMATION information{};
+  if (GetFileInformationByHandle(file.get(), &information) == FALSE) {
+    return SecretError("the secret file metadata could not be read");
+  }
+  if ((information.dwFileAttributes &
+       (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) != 0U) {
+    return ForbiddenError("the secret path is not a regular non-reparse file");
+  }
+  const Error dacl_error = ValidateWindowsDacl(file.get());
+  if (dacl_error) {
+    return dacl_error;
+  }
+  return file;
+}
+
+Result<SecretString> ReadValidatedSecretFile(UniqueHandle file) {
+  LARGE_INTEGER file_size{};
+  if (GetFileSizeEx(file.get(), &file_size) == FALSE || file_size.QuadPart < 0) {
+    return SecretError("the secret file size could not be read");
+  }
+  if (file_size.QuadPart == 0) {
+    return SecretError("the secret file is empty");
+  }
+  if (static_cast<unsigned long long>(file_size.QuadPart) > kMaxSecretBytes) {
+    return TooLargeError("the secret file exceeds 65536 bytes");
+  }
+
+  SensitiveBuffer secret;
+  SensitiveChunk chunk;
+  for (;;) {
+    const std::size_t remaining = kMaxSecretBytes + 1U - secret.bytes().size();
+    const DWORD requested = static_cast<DWORD>(std::min(remaining, chunk.bytes.size()));
+    DWORD bytes_read = 0U;
+    if (ReadFile(file.get(), chunk.bytes.data(), requested, &bytes_read, nullptr) == FALSE) {
+      return SecretError("the secret file could not be read");
+    }
+    if (bytes_read == 0U) {
       break;
     }
-    total += count;
+    secret.bytes().append(chunk.bytes.data(), static_cast<std::size_t>(bytes_read));
+    if (secret.bytes().size() > kMaxSecretBytes) {
+      return TooLargeError("the secret file exceeds 65536 bytes");
+    }
   }
-  if (total > kMaxSecretBytes) {
-    CleanseString(value);
-    return TooLargeError("secret file exceeds its byte limit");
+  const Error normalization = NormalizeFileSecret(secret.bytes());
+  if (normalization) {
+    return normalization;
   }
-  value.resize(total);
-  if (value.empty()) {
-    return SecretError("secret file is empty");
-  }
-  TrimOneTrailingNewline(value);
-  if (value.empty()) {
-    return SecretError("secret file contains no secret bytes");
-  }
-  return SecretString(std::move(value));
+  return secret.IntoSecret();
 }
 
 class CredentialGuard {
@@ -441,7 +534,7 @@ class CredentialGuard {
   explicit CredentialGuard(PCREDENTIALW credential) noexcept : credential_(credential) {}
   ~CredentialGuard() {
     if (credential_ != nullptr) {
-      if (credential_->CredentialBlob != nullptr && credential_->CredentialBlobSize > 0U) {
+      if (credential_->CredentialBlob != nullptr && credential_->CredentialBlobSize != 0U) {
         OPENSSL_cleanse(credential_->CredentialBlob, credential_->CredentialBlobSize);
       }
       CredFree(credential_);
@@ -452,174 +545,170 @@ class CredentialGuard {
   CredentialGuard& operator=(const CredentialGuard&) = delete;
 
  private:
-  PCREDENTIALW credential_ = nullptr;
+  PCREDENTIALW credential_;
 };
 
-Result<SecretString> ResolveWindowsCredential(std::string_view target) {
-  if (target.empty() || target.size() > kMaxBackendNameBytes || ContainsNul(target) ||
-      !IsValidUtf8(target)) {
-    return SecretError("Windows credential target is invalid");
+Result<SecretString> ResolveWincred(std::string_view target) {
+  if (target.empty() || target.size() > kMaxWincredTargetBytes || !IsValidUtf8(target)) {
+    return SecretError("the Windows credential target is invalid");
   }
-  auto wide_target = Utf8ToWide(target);
-  if (!wide_target) {
-    return wide_target.error();
+  auto converted = Utf8ToWide(target);
+  if (!converted) {
+    return converted.error();
   }
 
-  PCREDENTIALW raw_credential = nullptr;
-  if (CredReadW(wide_target.value().c_str(), CRED_TYPE_GENERIC, 0U,
-                &raw_credential) == FALSE || raw_credential == nullptr) {
-    return SecretError("Windows credential was not found");
+  PCREDENTIALW credential = nullptr;
+  if (CredReadW(converted.value().c_str(), CRED_TYPE_GENERIC, 0U, &credential) == FALSE ||
+      credential == nullptr) {
+    return SecretError("the Windows credential could not be resolved");
   }
-  CredentialGuard credential(raw_credential);
-  const std::size_t size = raw_credential->CredentialBlobSize;
-  if (size == 0U || raw_credential->CredentialBlob == nullptr) {
-    return SecretError("Windows credential is empty");
+  CredentialGuard guard(credential);
+  const std::size_t size = static_cast<std::size_t>(credential->CredentialBlobSize);
+  if (size == 0U || credential->CredentialBlob == nullptr) {
+    return SecretError("the Windows credential is empty");
   }
   if (size > kMaxSecretBytes) {
-    return TooLargeError("Windows credential exceeds its byte limit");
+    return TooLargeError("the Windows credential exceeds 65536 bytes");
   }
-  const std::string_view blob(
-      reinterpret_cast<const char*>(raw_credential->CredentialBlob), size);
-  if (!IsValidUtf8(blob)) {
-    return SecretError("Windows credential is not valid UTF-8");
+  const std::string_view value(
+      reinterpret_cast<const char*>(credential->CredentialBlob), size);
+  if (!IsValidUtf8(value)) {
+    return SecretError("the Windows credential is not valid UTF-8");
   }
-  return SecretString(std::string(blob));
+  return SecretString{std::string(value)};
 }
 
 #else
 
-class NativeHandle {
+bool IsAbsoluteSecretPath(std::string_view path) noexcept {
+  return !path.empty() && path.size() <= kMaxSecretLocationBytes && path.front() == '/' &&
+         path.find('\0') == std::string_view::npos;
+}
+
+class UniqueFd {
  public:
-  NativeHandle() = default;
-  explicit NativeHandle(int descriptor) noexcept : descriptor_(descriptor) {}
-  ~NativeHandle() { Reset(); }
+  explicit UniqueFd(int fd = -1) noexcept : fd_(fd) {}
+  ~UniqueFd() {
+    if (fd_ >= 0) {
+      static_cast<void>(close(fd_));
+    }
+  }
 
-  NativeHandle(const NativeHandle&) = delete;
-  NativeHandle& operator=(const NativeHandle&) = delete;
+  UniqueFd(const UniqueFd&) = delete;
+  UniqueFd& operator=(const UniqueFd&) = delete;
 
-  NativeHandle(NativeHandle&& other) noexcept : descriptor_(other.Release()) {}
-  NativeHandle& operator=(NativeHandle&& other) noexcept {
+  UniqueFd(UniqueFd&& other) noexcept : fd_(other.fd_) { other.fd_ = -1; }
+  UniqueFd& operator=(UniqueFd&& other) noexcept {
     if (this != &other) {
-      Reset();
-      descriptor_ = other.Release();
+      if (fd_ >= 0) {
+        static_cast<void>(close(fd_));
+      }
+      fd_ = other.fd_;
+      other.fd_ = -1;
     }
     return *this;
   }
 
-  int get() const noexcept { return descriptor_; }
+  int get() const noexcept { return fd_; }
 
  private:
-  int Release() noexcept {
-    const int released = descriptor_;
-    descriptor_ = -1;
-    return released;
-  }
-
-  void Reset() noexcept {
-    if (descriptor_ >= 0) {
-      static_cast<void>(close(descriptor_));
-    }
-    descriptor_ = -1;
-  }
-
-  int descriptor_ = -1;
+  int fd_;
 };
 
-Error PosixOpenError(int code) {
-  if (code == ELOOP || code == EACCES || code == EPERM || code == ENXIO ||
-      code == ENODEV || code == EISDIR) {
-    return ForbiddenError("access to the secret file was denied");
+Result<UniqueFd> OpenValidatedSecretFile(std::string_view path) {
+#if !defined(O_NOFOLLOW) || !defined(O_CLOEXEC)
+  static_cast<void>(path);
+  return ForbiddenError("the platform lacks secure secret-file open flags");
+#else
+  const int fd = open(std::string(path).c_str(),
+                      O_RDONLY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK);
+  if (fd < 0) {
+    if (errno == ELOOP || errno == EACCES || errno == EPERM) {
+      return ForbiddenError("the secret file cannot be opened safely");
+    }
+    return SecretError("the secret file could not be opened");
   }
-  return SecretError("unable to open the secret file");
-}
-
-Result<NativeHandle> OpenValidatedSecretFile(const std::string& path) {
-  const int descriptor = open(path.c_str(), O_RDONLY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK);
-  if (descriptor < 0) {
-    return PosixOpenError(errno);
-  }
-  NativeHandle file(descriptor);
+  UniqueFd file(fd);
 
   struct stat status {};
   if (fstat(file.get(), &status) != 0) {
-    return ForbiddenError("unable to inspect the opened secret file");
+    return SecretError("the secret file metadata could not be read");
   }
   if (!S_ISREG(status.st_mode)) {
-    return ForbiddenError("secret file is not a regular file");
+    return ForbiddenError("the secret path is not a regular file");
   }
   if (status.st_uid != getuid() && status.st_uid != 0U) {
-    return ForbiddenError("secret file owner is not trusted");
+    return ForbiddenError("the secret file owner is not allowed");
   }
-  const mode_t permission_bits = status.st_mode & static_cast<mode_t>(0777);
-  if (permission_bits != static_cast<mode_t>(0600) &&
-      permission_bits != static_cast<mode_t>(0400)) {
-    return ForbiddenError("secret file permissions must be 0600 or 0400");
+  const mode_t permissions = status.st_mode &
+                             static_cast<mode_t>(S_IRWXU | S_IRWXG | S_IRWXO | S_ISUID |
+                                                 S_ISGID | S_ISVTX);
+  if (permissions != static_cast<mode_t>(S_IRUSR | S_IWUSR) &&
+      permissions != static_cast<mode_t>(S_IRUSR)) {
+    return ForbiddenError("the secret file permissions are not 0600 or 0400");
   }
-  return Result<NativeHandle>{std::move(file)};
+  return file;
+#endif
 }
 
-Result<SecretString> ReadValidatedSecretFile(NativeHandle& file) {
+Result<SecretString> ReadValidatedSecretFile(UniqueFd file) {
   struct stat status {};
   if (fstat(file.get(), &status) != 0 || status.st_size < 0) {
-    return SecretError("unable to determine the secret file size");
+    return SecretError("the secret file size could not be read");
   }
   if (status.st_size == 0) {
-    return SecretError("secret file is empty");
+    return SecretError("the secret file is empty");
   }
   if (static_cast<std::uintmax_t>(status.st_size) > kMaxSecretBytes) {
-    return TooLargeError("secret file exceeds its byte limit");
+    return TooLargeError("the secret file exceeds 65536 bytes");
   }
 
-  std::string value(kMaxSecretBytes + 1U, '\0');
-  std::size_t total = 0U;
-  while (total < value.size()) {
-    const ssize_t count = read(file.get(), value.data() + total, value.size() - total);
-    if (count < 0) {
+  SensitiveBuffer secret;
+  SensitiveChunk chunk;
+  for (;;) {
+    const std::size_t remaining = kMaxSecretBytes + 1U - secret.bytes().size();
+    const std::size_t requested = std::min(remaining, chunk.bytes.size());
+    const ssize_t bytes_read = read(file.get(), chunk.bytes.data(), requested);
+    if (bytes_read < 0) {
       if (errno == EINTR) {
         continue;
       }
-      CleanseString(value);
-      return SecretError("unable to read the secret file");
+      return SecretError("the secret file could not be read");
     }
-    if (count == 0) {
+    if (bytes_read == 0) {
       break;
     }
-    total += static_cast<std::size_t>(count);
+    secret.bytes().append(chunk.bytes.data(), static_cast<std::size_t>(bytes_read));
+    if (secret.bytes().size() > kMaxSecretBytes) {
+      return TooLargeError("the secret file exceeds 65536 bytes");
+    }
   }
-  if (total > kMaxSecretBytes) {
-    CleanseString(value);
-    return TooLargeError("secret file exceeds its byte limit");
+  const Error normalization = NormalizeFileSecret(secret.bytes());
+  if (normalization) {
+    return normalization;
   }
-  value.resize(total);
-  if (value.empty()) {
-    return SecretError("secret file is empty");
-  }
-  TrimOneTrailingNewline(value);
-  if (value.empty()) {
-    return SecretError("secret file contains no secret bytes");
-  }
-  return SecretString(std::move(value));
+  return secret.IntoSecret();
 }
 
 #endif
 
-Result<SecretString> ResolveEnvironmentSecret(std::string_view name) {
+Result<SecretString> ResolveEnvironment(std::string_view name) {
   if (!IsValidEnvironmentName(name)) {
-    return SecretError("environment secret name is invalid");
+    return SecretError("the environment variable name is invalid");
   }
-  const std::string name_storage(name);
-  const char* raw_value = std::getenv(name_storage.c_str());
-  if (raw_value == nullptr || raw_value[0] == '\0') {
-    return SecretError("environment secret is unset or empty");
+  const std::string name_string(name);
+  const char* const value = std::getenv(name_string.c_str());
+  if (value == nullptr || value[0] == '\0') {
+    return SecretError("the environment secret is not set");
   }
   std::size_t size = 0U;
-  while (size <= kMaxSecretBytes && raw_value[size] != '\0') {
+  while (size <= kMaxSecretBytes && value[size] != '\0') {
     ++size;
   }
   if (size > kMaxSecretBytes) {
-    return TooLargeError("environment secret exceeds its byte limit");
+    return TooLargeError("the environment secret exceeds 65536 bytes");
   }
-  return SecretString(std::string(raw_value, size));
+  return SecretString{std::string(value, size)};
 }
 
 }  // namespace
@@ -641,67 +730,83 @@ std::string_view SecretRef::location() const noexcept {
 }
 
 Result<SecretString> ResolveSecret(const SecretRef& ref) {
-  if (Error error = ValidateSecretUri(ref); error) {
-    return error;
-  }
+  try {
+    if (!IsValidSecretUri(ref.uri)) {
+      return SecretError("the secret reference URI is invalid");
+    }
 
 #if defined(COGITO_TESTING)
-  const auto mock = g_mock_secrets.find(ref.uri);
-  if (mock != g_mock_secrets.end()) {
-    return SecretString(std::string(mock->second.Expose()));
-  }
+    const auto mock = g_mock_secrets.find(ref.uri);
+    if (mock != g_mock_secrets.end()) {
+      return SecretString{std::string(mock->second.Expose())};
+    }
 #endif
 
-  const std::string_view scheme = ref.scheme();
-  const std::string_view location = ref.location();
-  if (scheme == "env") {
-    return ResolveEnvironmentSecret(location);
-  }
-  if (scheme == "file") {
-    if (!IsAbsoluteSecretPath(location)) {
-      return SecretError("secret file path must be absolute");
+    const std::string_view scheme = ref.scheme();
+    const std::string_view location = ref.location();
+    if (scheme == "env") {
+      return ResolveEnvironment(location);
     }
-    auto file = OpenValidatedSecretFile(std::string(location));
-    if (!file) {
-      return file.error();
+    if (scheme == "file") {
+      if (!IsAbsoluteSecretPath(location)) {
+        return SecretError("the secret file path is not an allowed absolute path");
+      }
+      auto opened = OpenValidatedSecretFile(location);
+      if (!opened) {
+        return opened.error();
+      }
+      return ReadValidatedSecretFile(std::move(opened).take());
     }
-    return ReadValidatedSecretFile(file.value());
-  }
-  if (scheme == "wincred") {
-    if (location.empty() || location.size() > kMaxBackendNameBytes ||
-        ContainsNul(location) || !IsValidUtf8(location)) {
-      return SecretError("Windows credential target is invalid");
-    }
+    if (scheme == "wincred") {
 #if defined(_WIN32)
-    return ResolveWindowsCredential(location);
+      return ResolveWincred(location);
 #else
-    return SecretError("Windows credential backend is unavailable");
+      static_cast<void>(location);
+      return SecretError("Windows Credential Manager is unavailable on this platform");
 #endif
+    }
+    return SecretError("the keyring secret backend is unsupported in core v1");
+  } catch (const std::bad_alloc&) {
+    return SecretError("out of memory while resolving a secret");
+  } catch (...) {
+    return SecretError("unexpected secret resolution failure");
   }
-  return SecretError("keyring backend is unsupported in core v1");
 }
 
 Error CheckSecretFilePermissions(const std::string& path) {
-  if (!IsAbsoluteSecretPath(path)) {
-    return ForbiddenError("secret file path must be absolute");
+  try {
+    if (!IsAbsoluteSecretPath(path)) {
+      return ForbiddenError("the secret file path is not an allowed absolute path");
+    }
+    auto opened = OpenValidatedSecretFile(path);
+    if (!opened) {
+      return ForbiddenError("the secret file failed the permission check");
+    }
+    return Error::Ok();
+  } catch (...) {
+    return ForbiddenError("the secret file permission check failed");
   }
-  auto file = OpenValidatedSecretFile(path);
-  if (!file) {
-    return ForbiddenError("secret file permission validation failed");
-  }
-  return Error::Ok();
 }
 
 #if defined(COGITO_TESTING)
 namespace testing {
 
-void SecretTestSeam::SetMockSecret(std::string_view uri,
-                                   std::string_view secret_value) {
-  g_mock_secrets.insert_or_assign(std::string(uri),
-                                  SecretString(std::string(secret_value)));
+void SecretTestSeam::SetMockSecret(std::string_view uri, std::string_view secret_value) {
+  SecretString replacement{std::string(secret_value)};
+  const auto existing = g_mock_secrets.find(std::string(uri));
+  if (existing == g_mock_secrets.end()) {
+    g_mock_secrets.emplace(std::string(uri), std::move(replacement));
+  } else {
+    existing->second = std::move(replacement);
+  }
 }
 
-void SecretTestSeam::ClearMockSecrets() { g_mock_secrets.clear(); }
+void SecretTestSeam::ClearMockSecrets() {
+  for (auto& entry : g_mock_secrets) {
+    entry.second.Clear();
+  }
+  g_mock_secrets.clear();
+}
 
 }  // namespace testing
 #endif

@@ -2,12 +2,18 @@
 // Cogito++ — 턴 실행 상태기계
 //
 // 규범 근거 : Cogito++_구현명세서.md §4-10, §5
-// G0 결정   : G0-24 (docs/g0/G0-RESOLUTION-9.md ⑤), ADR-0001 D1·D5·D6
+// G0 결정   : G0-24 (Accepted — docs/g0/G0-RESOLUTION-9.md ⑤), ADR-0001 D1·D5·D6 (Accepted)
 //
 // 이 파일이 "LLM 의 판단이 행동으로 이어지는 경로"의 유일한 규범이다.
 // 전이는 명시표 19개 + 보편 규칙 R0~R4 가 전부다. 다른 곳에서 상태를 바꾸지 않는다.
 //
-// ⚠ ADR-0001 (D1, D5, D6) 및 G0-RESOLUTION-9 승인 완료. 본 헤더가 정식 규범으로 확정됨.
+// [S3 FSM 공식 규범 확정 (2026-08-27)]:
+// - R0~R4 보편 규칙 및 명시 전이표 19개를 단일 source of truth로 확정.
+// - Idle+Cancel 은 R0 no-op, 종료 상태(Done/Failed/Cancelled) + AuditError/Cancel 은 R4 no-op.
+// - R1(AuditError->Failed) 대상: {Infer, Propose, Gate, AwaitApproval, Execute, Observe}.
+// - R2(Cancel->Cancelled) 대상: {Infer, Propose, Gate, AwaitApproval, Observe}.
+// - R3: Execute 는 Cancel 이벤트를 직접 받지 않으며 CancelToken/ToolResult 로만 Observe 에 진입.
+// - 다음 턴 진입은 Dispatch(StartNextTurn) 로만 수행하며 ResetForTestOnly 는 테스트 전용으로 제한.
 #ifndef COGITO_FSM_HPP
 #define COGITO_FSM_HPP
 

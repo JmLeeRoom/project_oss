@@ -1,112 +1,264 @@
-﻿# [Gemini Task] Codex TICKET-S6-CORE-ENGINE-001 Conversation, Invoker, AgentLoop 통합 구현 (체크리스트 S6-01 ~ S6-12)
+# [Gemini Task] Codex TICKET-S3-FSM-001 턴 실행 상태기계 (FSM) 구현 및 결정론적 전이표 검증 (체크리스트 S3-01 ~ S3-05)
 
 > **작성자**: Gemini (설계·계약 총괄)
 > **수행자**: Codex (구현·빌드·테스트 전담)
-> **기준일**: 2026-08-26
-> **티켓**: **TICKET-S6-CORE-ENGINE-001 (체크리스트 S6-01 ~ S6-12)**
-> **승인 상태**: G0-02, G0-04, G0-05, G0-06, G0-07, G0-25, G0-27, G0-28, G0-31 및 ADR-0001, ADR-0004 승인 완료.
+> **기준일**: 2026-08-27
+> **티켓**: **TICKET-S3-FSM-001 (체크리스트 S3-01, S3-02, S3-03, S3-04, S3-05)**
+> **승인 상태**: S0, S1, S2 완료 및 승인(84/84 PASS), G0-24 Accepted(2026-08-27), ADR-0001(D1·D2·D3·D5·D6) Accepted 반영 완료 — S3 FSM 단독 착수 공식 승인
 
 ---
 
 ## 1. Objective (단일 집중 티켓 목표)
 
-S1~S5에서 구축된 기초 모듈(CCJ, FSM, Registry, Policy, Budget, Permit, Gate, Audit)을 종합 연동하는 **Cogito++ 핵심 에이전트 실행 엔진(Conversation, ToolInvoker, Inference, AgentLoop)**을 구현하고 전체 통합 시나리오 테스트를 전수 통과시킵니다.
+S2 단계(Tool Schema, Registry, Config/Secret)의 성공적 완료에 이어, Cogito++ 코어 엔진의 중심 상태 머신인 **FSM (`Fsm`, `State`, `Event`, `TransitionRecord`, `ToString`, `IsTerminal`, `ResolveUniversal`, `VerifyTableIntegrity`, `DumpTable`)**을 구현하고 19개 명시 전이 및 R0~R4 보편 규칙을 전수 단위 검증합니다.
 
 ---
 
-## 2. Header & Contract Specification (Gemini 소유 공개 헤더 참조)
+## 2. Header & Contract Specification (Gemini 소유 공개 헤더)
 
-Codex는 아래 선언된 공개 헤더 계약을 100% 준수합니다:
+Codex는 `include/cogito/**` 공개 헤더의 선언 및 계약을 100% 준수합니다:
 
-### 2-1. 신규 및 기존 헤더 계약 목록
-- `include/cogito/conversation.hpp`: `Role`, `Message`, `ConversationStore`
-- `include/cogito/context_compactor.hpp`: `ContextCompactor`, `CompactionResult`, `MakeDropOldestObservationCompactor()`, `MakeNoopCompactor()`
-- `include/cogito/inference.hpp`: `Usage`, `FinishReason`, `CancelToken`, `ProviderIdentity`, `InferenceRequest`, `InferenceResponse`, `InferenceAdapter`, `FakeProvider`
-- `include/cogito/invoker.hpp`: `ToolCallContext`, `ToolInvoker`, `MakeInvalidToolResult`
-- `include/cogito/agent_loop.hpp`: `TurnStatus`, `TurnOutcome`, `AgentDeps`, `AgentLoopConfig`, `AgentLoop`
-- `include/cogito/permission_gate.hpp`: `GateInput`, `ApprovalRecord`, `ApprovalStore`, `ApprovalLookupResult`, `PermissionGate`
-- `include/cogito/audit.hpp`: `AuditEvent`, `AuditJournal`, `RecordingAuditJournal`
-- `include/cogito/fsm.hpp`: `Fsm`, `State`, `Event`, `TransitionRecord`
-- `include/cogito/permit.hpp`: `ExecutionPermit`
-- `include/cogito/budget.hpp`: `BudgetTracker`, `TurnBudget`
+### 2-1. 헤더 계약 목록
+- [`include/cogito/fsm.hpp`](file:///C:/Users/yoonsy/Desktop/%EC%97%85%EB%AC%B4_2026/1.%20%EC%97%B0%EA%B5%AC%EC%86%8C/0.%20%ED%94%84%EB%A1%9C%EC%A0%9D%ED%8A%B8/2026/codyssey/project_oss/include/cogito/fsm.hpp):
+  `State`, `Event`, `Transition`, `kTransitions`, `TransitionRecord`, `Fsm`, `ToString`, `IsTerminal`
+- [`include/cogito/clock.hpp`](file:///C:/Users/yoonsy/Desktop/%EC%97%85%EB%AC%B4_2026/1.%20%EC%97%B0%EA%B5%AC%EC%86%8C/0.%20%ED%94%84%EB%A1%9C%EC%A0%9D%ED%8A%B8/2026/codyssey/project_oss/include/cogito/clock.hpp):
+  `Clock`, `SystemClock`, `FakeClock` (`NowUtcRfc3339()`, `MonotonicNs()`)
+- [`include/cogito/ids.hpp`](file:///C:/Users/yoonsy/Desktop/%EC%97%85%EB%AC%B4_2026/1.%20%EC%97%B0%EA%B5%AC%EC%86%8C/0.%20%ED%94%84%EB%A1%9C%EC%A0%9D%ED%8A%B8/2026/codyssey/project_oss/include/cogito/ids.hpp):
+  `ActionId`, `TurnId`
+- [`include/cogito/canonical_json.hpp`](file:///C:/Users/yoonsy/Desktop/%EC%97%85%EB%AC%B4_2026/1.%20%EC%97%B0%EA%B5%AC%EC%86%8C/0.%20%ED%94%84%EB%A1%9C%EC%A0%9D%ED%8A%B8/2026/codyssey/project_oss/include/cogito/canonical_json.hpp):
+  `ccj::Json`
+- [`include/cogito/result.hpp`](file:///C:/Users/yoonsy/Desktop/%EC%97%85%EB%AC%B4_2026/1.%20%EC%97%B0%EA%B5%AC%EC%86%8C/0.%20%ED%94%84%EB%A1%9C%EC%A0%9D%ED%8A%B8/2026/codyssey/project_oss/include/cogito/result.hpp):
+  `Error`, `Errc::Internal`
 
 ---
 
 ## 3. Implementation Specification (세부 구현 규범)
 
-### 3-1. ConversationStore & ContextCompactor (S6-01)
-1. `src/conversation.cpp`:
-   - `MakeDropOldestObservationCompactor()`:
-     - 컨텍스트 크기가 `context_soft_limit_bytes`를 초과할 경우 가장 오래된 `Role::Tool` 메시지부터 제거.
-     - **보존 필수 3요소**: (1) `Role::System` 정책 메시지, (2) 미결 Action 관련 메시지, (3) 가장 최근 `Role::Tool` 결과.
-     - `untrusted` 속성 및 출처(`provenance`) 보존.
-     - 버전 문자열: `"drop-oldest-observation-v1.0"`.
-   - `MakeNoopCompactor()`:
-     - 축약 없이 `compacted = false` 반환. 버전 문자열: `"none-v1.0"`.
+### 3-1. Enum 정의, 문자열 변환 및 터미널 판정 (`ToString`, `IsTerminal`)
 
-### 3-2. ToolInvoker (S6-03, S6-04)
-1. `src/invoker.cpp`:
-   - `ToolInvoker::Invoke(ExecutionPermit&& permit, const ccj::Json& arguments, const ToolCallContext& ctx)`:
-     - **Permit 유효성 검사**: `permit.CheckUsable(td.name, action_digest, scope_digest, now_ns)`.
-     - **Permit 단일 소비**: 핸들러 실행 직전에 `permit.Consume()`.
-     - **핸들러 실행**: 최대 1회 (재시도 0회).
-     - **결과 검증**: 크기 상한(`max_output_bytes`) -> Strict JSON 파싱 -> `output_schema` 검증 (G0-27). 위반 시 `MakeInvalidToolResult` 주입.
-     - **예외 격리**: 핸들러의 예외를 포착하여 `ToolResultStatus::Error`로 변환 (C ABI 전파 차단).
-     - **취소 및 타임아웃 분류 (ADR-0001 R3)**:
-       - `effect == Effect::None`: 취소 시 `Cancelled`, 타임아웃 시 `Timeout`.
-       - `effect != Effect::None`: 취소 및 타임아웃 시 모두 **`Indeterminate`** 로 분류 (설비 상태 불확실성).
+1. **`State` (10개 고정 상태)**:
+   - `Idle`, `Infer`, `Propose`, `Gate`, `AwaitApproval`, `Execute`, `Observe`, `Done`, `Failed`, `Cancelled`
+   - `ToString(State s)` 반환 문자열:
+     - `State::Idle` $\rightarrow$ `"Idle"`
+     - `State::Infer` $\rightarrow$ `"Infer"`
+     - `State::Propose` $\rightarrow$ `"Propose"`
+     - `State::Gate` $\rightarrow$ `"Gate"`
+     - `State::AwaitApproval` $\rightarrow$ `"AwaitApproval"`
+     - `State::Execute` $\rightarrow$ `"Execute"`
+     - `State::Observe` $\rightarrow$ `"Observe"`
+     - `State::Done` $\rightarrow$ `"Done"`
+     - `State::Failed` $\rightarrow$ `"Failed"`
+     - `State::Cancelled` $\rightarrow$ `"Cancelled"`
+     - 그 외 잘못된 enum 값 $\rightarrow$ `"UnknownState"`
 
-### 3-3. AgentLoop 핵심 오케스트레이션 (S6-05 ~ S6-12)
-1. `src/agent_loop.cpp`:
-   - **단일 스레드 가드 (`in_call_`)**: 동시 호출 또는 재진입 시 `Errc::ConcurrentAccess` 또는 즉시 오류 반환.
-   - **`RunTurn(user_input)` & `ResumeTurn()` 수렴**:
-     - `turn_begin` 감사 커밋 (`AuditJournal::Commit`) -> FSM 상태 전이.
-     - 대화 기록에 사용자 입력 추가 -> 토큰 예약(`BudgetTracker::ReserveTokens`).
-     - `InferenceAdapter::Complete` 호출.
-     - Action 미요청 시 -> `Finalize(Completed)`.
-     - Action 제안 시 -> `PermissionGate::Evaluate` 실행.
-   - **Gate 커밋 프로토콜 (§6-2-a)**:
-     - **Deny 판정**: `verdict` 감사 커밋 -> `Fire(Event::Deny)` -> 거부 메시지 대화 주입 -> `Finalize(Completed 또는 Failed)`.
-     - **Ask 판정**: `approval_requested` 감사 커밋 -> `Fire(Event::Ask)` -> `pending_action_` 보관 -> `TurnOutcome{Status::PendingApproval}` 반환 (턴 종료 커밋 안 함).
-     - **Allow 판정**:
-       - `tool_call_started` (with `idempotency_key`) 감사 커밋 -> `gate_.IssuePermit` -> `Fire(Event::Allow)` -> `ToolInvoker::Invoke` -> `tool_result` 감사 커밋 -> `Fire(Event::Observe)`.
-       - 결과 대화 주입 및 토큰 정산 -> 다음 추론 또는 턴 마무리.
-   - **불확실성 잠금 (`IndeterminateLockdown`)**:
-     - `ToolResultStatus::Indeterminate` 발생 시 `indeterminate_locks_.insert(operation_digest)`.
-     - 이후 동일 `operation_digest` 요청은 Gate 5단계에서 거부.
-     - `AcknowledgeIndeterminate`: `operator_ack` 감사 성공 시에만 해당 잠금 해제.
-   - **세션 봉인 및 종료 (`SealSession`, `RetryFinalize`)**:
-     - `turn_end` 감사 커밋 실패 시 `finalize_pending_ = true` 설정 및 다음 턴 진입 차단.
-     - `RetryFinalize()`로 동일 payload 멱등 재커밋 시도.
+2. **`Event` (19개 고정 이벤트)**:
+   - `UserInput`, `InferOk`, `ProviderError`, `BudgetExhausted`, `Cancel`,
+     `NoAction`, `OneAction`, `MultipleActions`,
+     `Deny`, `Ask`, `Allow`, `AuditError`,
+     `Approved`, `RejectedOrExpired`,
+     `ExecOk`, `ExecErrorOrIndeterminate`,
+     `Continue`, `CompleteOrLimit`,
+     `StartNextTurn`
+   - `ToString(Event ev)` 반환 문자열:
+     - `Event::UserInput` $\rightarrow$ `"UserInput"`
+     - `Event::InferOk` $\rightarrow$ `"InferOk"`
+     - `Event::ProviderError` $\rightarrow$ `"ProviderError"`
+     - `Event::BudgetExhausted` $\rightarrow$ `"BudgetExhausted"`
+     - `Event::Cancel` $\rightarrow$ `"Cancel"`
+     - `Event::NoAction` $\rightarrow$ `"NoAction"`
+     - `Event::OneAction` $\rightarrow$ `"OneAction"`
+     - `Event::MultipleActions` $\rightarrow$ `"MultipleActions"`
+     - `Event::Deny` $\rightarrow$ `"Deny"`
+     - `Event::Ask` $\rightarrow$ `"Ask"`
+     - `Event::Allow` $\rightarrow$ `"Allow"`
+     - `Event::AuditError` $\rightarrow$ `"AuditError"`
+     - `Event::Approved` $\rightarrow$ `"Approved"`
+     - `Event::RejectedOrExpired` $\rightarrow$ `"RejectedOrExpired"`
+     - `Event::ExecOk` $\rightarrow$ `"ExecOk"`
+     - `Event::ExecErrorOrIndeterminate` $\rightarrow$ `"ExecErrorOrIndeterminate"`
+     - `Event::Continue` $\rightarrow$ `"Continue"`
+     - `Event::CompleteOrLimit` $\rightarrow$ `"CompleteOrLimit"`
+     - `Event::StartNextTurn` $\rightarrow$ `"StartNextTurn"`
+     - 그 외 잘못된 enum 값 $\rightarrow$ `"UnknownEvent"`
+
+3. **`IsTerminal(State s)`**:
+   - `s == State::Done || s == State::Failed || s == State::Cancelled` 인 경우에만 `true`, 그 외 `false`.
 
 ---
 
-## 4. Codex Write Scope (작업 허용 파일)
+### 3-2. 명시 전이표 19개 (`kTransitions`)
+
+헤더에 선언된 `constexpr std::array<Transition, 19> kTransitions`가 명시 전이의 유일한 단일 원천(SSOT)입니다:
+```cpp
+{State::Idle,          Event::UserInput,                State::Infer},
+{State::Infer,         Event::InferOk,                  State::Propose},
+{State::Infer,         Event::ProviderError,            State::Failed},
+{State::Infer,         Event::BudgetExhausted,          State::Done},
+{State::Propose,       Event::NoAction,                 State::Done},
+{State::Propose,       Event::OneAction,                State::Gate},
+{State::Propose,       Event::MultipleActions,          State::Failed},
+{State::Gate,          Event::Deny,                     State::Observe},
+{State::Gate,          Event::Ask,                      State::AwaitApproval},
+{State::Gate,          Event::Allow,                    State::Execute},
+{State::AwaitApproval, Event::Approved,                 State::Gate},
+{State::AwaitApproval, Event::RejectedOrExpired,        State::Observe},
+{State::Execute,       Event::ExecOk,                   State::Observe},
+{State::Execute,       Event::ExecErrorOrIndeterminate, State::Observe},
+{State::Observe,       Event::Continue,                 State::Infer},
+{State::Observe,       Event::CompleteOrLimit,          State::Done},
+{State::Done,          Event::StartNextTurn,            State::Idle},
+{State::Failed,        Event::StartNextTurn,            State::Idle},
+{State::Cancelled,     Event::StartNextTurn,            State::Idle}
+```
+
+---
+
+### 3-3. 보편 규칙 R0~R4 해석기 (`Fsm::ResolveUniversal`)
+
+`ResolveUniversal(State from, Event ev, State* to, bool* noop) noexcept`는 명시 전이표에 없는 보편 규칙을 결정론적으로 해석합니다:
+
+1. **[R0] `Idle + Cancel`**:
+   - `from == State::Idle && ev == Event::Cancel`
+   - `*noop = true`, `*to = State::Idle`, 반환 `true`.
+   - 전이 및 감사 기록 대상이 아니며, Dispatch는 `applied = false`, `Error::Ok()`를 반환합니다.
+
+2. **[R4] 종료 상태 (`Done`, `Failed`, `Cancelled`) + `AuditError | Cancel`**:
+   - `IsTerminal(from) && (ev == Event::AuditError || ev == Event::Cancel)`
+   - `*noop = true`, `*to = from`, 반환 `true`.
+   - 이미 종료된 턴은 재실패/재취소되지 않으며 no-op(`applied = false`, `Error::Ok()`) 처리합니다.
+
+3. **[R1] `AuditError` $\rightarrow$ `Failed`**:
+   - `ev == Event::AuditError`
+   - 대상: `{Infer, Propose, Gate, AwaitApproval, Execute, Observe}` (비종료 활성 6개 상태)
+   - `*noop = false`, `*to = State::Failed`, 반환 `true`.
+
+4. **[R2] `Cancel` $\rightarrow$ `Cancelled`**:
+   - `ev == Event::Cancel`
+   - 대상: `{Infer, Propose, Gate, AwaitApproval, Observe}` (Execute 제외 비종료 5개 상태)
+   - `*noop = false`, `*to = State::Cancelled`, 반환 `true`.
+
+5. **[R3] `Execute` 상태의 `Cancel` 직접 수신 거부 및 `Timeout` 처리 규약**:
+   - `Execute` 상태에서 `Dispatch(Event::Cancel)`가 호출되면 `ResolveUniversal`은 `false`를 반환합니다.
+   - 명시 전이에도 없으므로 이는 **정의되지 않은 전이(Undefined Transition)**로 분류되어 fail-closed 원칙에 따라 상태가 즉시 `State::Failed`로 강제 전이되고 `Errc::Internal`이 반환됩니다.
+   - **정상 취소/타임아웃 실행 규약**: 도구 실행 도중의 취소/타임아웃은 `CancelToken` 또는 타임아웃 타이머에 의해 Invoker 내부에서 처리되어 `ToolResultStatus::Cancelled`, `ToolResultStatus::Timeout`, 또는 `ToolResultStatus::Indeterminate`를 생성하고, FSM에는 `Event::ExecErrorOrIndeterminate` 이벤트로 전달되어 정상적으로 `Observe` 상태로 진입합니다.
+
+6. **그 외 조합**:
+   - `*noop = false`, 반환 `false`.
+
+---
+
+### 3-4. 단일 전이 진입점 (`Fsm::Dispatch`)
+
+```cpp
+Error Fsm::Dispatch(Event ev,
+                    const std::string& cause,
+                    const ActionId& action_id,
+                    TurnId turn,
+                    const Clock& clock,
+                    TransitionRecord* out);
+```
+
+1. **전이 탐색 순서**:
+   - 1단계: 명시 전이표 `kTransitions` 순회 (우선순위 1)
+   - 2단계: `ResolveUniversal(s_, ev, &target, &noop)` 호출 (우선순위 2)
+   - 3단계: 미발견 시 **정의되지 않은 전이(Undefined Transition)** 처리 (fail-closed)
+
+2. **명시 전이 성공 시**:
+   - `State prev = s_; s_ = target;`
+   - `out`이 non-null인 경우:
+     - `out->applied = true;`
+     - `out->from = prev; out->to = target; out->ev = ev;`
+     - `out->cause = cause; out->action_id = action_id; out->turn_id = turn;`
+     - `out->wall_utc = clock.NowUtcRfc3339();`
+     - `out->monotonic_ns = clock.MonotonicNs();`
+     - `out->process_epoch_id = "";`
+   - `Error::Ok()` 반환.
+
+3. **보편 규칙 성공 시**:
+   - `noop == true`인 경우 (R0, R4):
+     - 상태 `s_` 변경 없음 (`s_` 유지).
+     - `out`이 non-null인 경우: `out->applied = false;`, `out->from = s_; out->to = s_; out->ev = ev;`, 나머지 필드는 클록 및 인자값 기록.
+     - `Error::Ok()` 반환.
+   - `noop == false`인 경우 (R1, R2):
+     - `State prev = s_; s_ = target;`
+     - `out`이 non-null인 경우: `out->applied = true;`, `out->from = prev; out->to = target; out->ev = ev;`, 나머지 필드 기록.
+     - `Error::Ok()` 반환.
+
+4. **미정의 전이 (Undefined Transition) 실패 시**:
+   - 상태 `s_`를 즉시 `State::Failed`로 강제 변경.
+   - `out`이 non-null인 경우:
+     - `out->applied = true;`
+     - `out->from = prev; out->to = State::Failed; out->ev = ev;`
+     - `out->cause = cause.empty() ? "undefined_transition" : cause;`
+     - `out->action_id = action_id; out->turn_id = turn;`
+     - `out->wall_utc = clock.NowUtcRfc3339();`
+     - `out->monotonic_ns = clock.MonotonicNs();`
+     - `out->process_epoch_id = "";`
+   - `Errc::Internal` 반환.
+
+---
+
+### 3-5. 기동 전이표 무결성 검증 (`Fsm::VerifyTableIntegrity`)
+
+기동 시 1회 호출되어 다음 4가지 조건을 검증하고, 위반 시 즉시 `Errc::Internal`을 반환합니다:
+
+1. **중복 전이 검사**: `kTransitions` 내에 동일한 `(from, ev)` 쌍이 0건이어야 함.
+2. **보편 규칙 충돌 검사**: `kTransitions` 내에 `Event::AuditError` 또는 `Event::Cancel`을 사용하는 명시 전이가 0건이어야 함.
+3. **도달 가능성 검사**: `State::Idle`로부터 (명시 19개 + 보편 규칙 간선 기준) 모든 비종료 상태(`Infer`, `Propose`, `Gate`, `AwaitApproval`, `Execute`, `Observe`)에 도달 가능해야 함 (BFS/DFS 탐색).
+4. **다음 턴 복귀 검사**: 모든 종료 상태(`Done`, `Failed`, `Cancelled`)에서 `Event::StartNextTurn`을 통해 `State::Idle`로 전이 가능해야 함.
+
+---
+
+### 3-6. 결정론적 전이표 직렬화 (`Fsm::DumpTable`)
+
+대시보드 §12-9 및 CLI `--dump-transitions`를 위해 **총 37개의 유효 전이 조합**을 CCJ v1 정규 JSON Array로 직렬화하여 반환합니다:
+
+1. **전이 객체 구조**:
+   `{"event":"<EventStr>","from":"<FromStateStr>","kind":"explicit"|"universal","rule":"explicit"|"R0"|"R1"|"R2"|"R4","to":"<ToStateStr>"}`
+2. **37개 항목의 결정론적 순서**:
+   - 1~19번: `kTransitions` 순서대로 19개 명시 전이 (`"kind":"explicit"`, `"rule":"explicit"`)
+   - 20번: R0 (Idle + Cancel $\rightarrow$ Idle, `"kind":"universal"`, `"rule":"R0"`)
+   - 21~26번: R1 6개 상태 (`Infer`, `Propose`, `Gate`, `AwaitApproval`, `Execute`, `Observe`) + AuditError $\rightarrow$ Failed (`"kind":"universal"`, `"rule":"R1"`)
+   - 27~31번: R2 5개 상태 (`Infer`, `Propose`, `Gate`, `AwaitApproval`, `Observe`) + Cancel $\rightarrow$ Cancelled (`"kind":"universal"`, `"rule":"R2"`)
+   - 32~37번: R4 3개 종료 상태 (`Done`, `Failed`, `Cancelled`) × 2개 이벤트 (`AuditError`, `Cancel`) $\rightarrow$ 자가 상태 유지 (`"kind":"universal"`, `"rule":"R4"`)
+
+---
+
+## 4. Codex Write Scope (작업 허용 4개 파일)
+
+Codex는 오직 아래 4개 파일만 작성/수정합니다:
 
 ```text
 [빌드 스크립트]
-- src/CMakeLists.txt
-- tests/CMakeLists.txt
+- src/CMakeLists.txt   (fsm.cpp 추가)
+- tests/CMakeLists.txt (fsm_test.cpp 추가)
 
 [구현 소스]
-- src/conversation.cpp
-- src/invoker.cpp
-- src/agent_loop.cpp
+- src/fsm.cpp
 
 [단위 테스트]
-- tests/conversation_test.cpp
-- tests/invoker_test.cpp
-- tests/loop_test.cpp
+- tests/fsm_test.cpp
 ```
 
 ---
 
 ## 5. Verification Deliverables (검증 요구사항)
 
-1. **컴파일 및 빌드**: MSVC / GCC / Clang 경고 0건 (`/W4 /WX`).
-2. **신규 단위 테스트 전수 통과**:
-   - `conversation_test`: 메시지 보존, 컨텍스트 축약 시 보호 3요소 보존, untrusted 플래그 유지 검증.
-   - `invoker_test`: Permit 소비 순서, 출력 스키마 위반 격리, 예외 방어, 부수효과 도구의 Cancelled/Timeout -> Indeterminate 분류 검증.
-   - `loop_test`: RunTurn 정상 대화, Tool 실행(Allow), 승인 대기(Ask) -> ResumeTurn(Approved), 거부(Deny), Indeterminate 발생 및 Acknowledge 복구, CancelToken 취소, 감사 실패 시 롤백 검증.
-3. **전체 회귀 테스트 100% 통과**: S1 ~ S5 포함 전체 테스트 전수 통과.
-4. **정적 분석**: `git diff --check` 공백 오류 0건.
+1. **빌드 무결성**:
+   - GCC 및 Clang 환경에서 경고 없이 빌드 완료 (`-Wall -Wextra -Wpedantic -Werror`).
+2. **단위 테스트 전수 통과 (`tests/fsm_test.cpp`)**:
+   - `core/fsm.string_mapping`: 10개 State, 19개 Event의 `ToString` 정확성 및 유효하지 않은 enum의 `"UnknownState"`, `"UnknownEvent"` 반환 검증.
+   - `core/fsm.terminal_classification`: `IsTerminal` 3개 상태 정확성 검증.
+   - `core/fsm.explicit_transitions`: 19개 명시 전이 정상 전이 및 `TransitionRecord` 필드 검증.
+   - `core/fsm.universal_r0_idle_cancel`: Idle + Cancel $\rightarrow$ 상태 불변, `applied == false`, `Error::Ok()`.
+   - `core/fsm.universal_r1_audit_error`: 활성 6개 상태에서 `State::Failed` 전이, `applied == true`.
+   - `core/fsm.universal_r2_cancel`: 활성 5개 상태에서 `State::Cancelled` 전이, `applied == true`.
+   - `core/fsm.universal_r3_execute_cancel_reject`: Execute + Cancel $\rightarrow$ undefined transition 분류, 상태 `Failed` 강제, `Errc::Internal` 반환.
+   - `core/fsm.universal_r4_terminal_noop`: 종료 3개 상태 + AuditError/Cancel $\rightarrow$ 상태 불변, `applied == false`, `Error::Ok()`.
+   - `core/fsm.undefined_transitions`: 임의의 미정의 (State, Event) 조합 시 즉시 `Failed` 강제 및 `Errc::Internal` 반환.
+   - `core/fsm.table_integrity`: `VerifyTableIntegrity()` 성공 검증.
+   - `core/fsm.dump_table_golden`: `DumpTable()` 호출 결과가 37개 요소를 정확한 순서와 속성으로 포함하는지 CCJ 파싱 및 직렬화 검증.
+   - `core/fsm.consecutive_turns`: `StartNextTurn`을 통한 다중 턴 라이프사이클 정상 전이 검증.
+3. **정적 분석 및 메모리 무결성**:
+   - ASan / UBSan 실행 시 메모리 누수 및 UB 0건.
+4. **`git diff --check`**: 공백 오류 0건.

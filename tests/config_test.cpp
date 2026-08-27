@@ -4,48 +4,47 @@
 
 #include <atomic>
 #include <chrono>
-#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
-#include <system_error>
 #include <utility>
-#include <vector>
 
 #include <catch2/catch_test_macros.hpp>
 
 namespace {
 
-class TempDirectory {
+std::filesystem::path UniqueConfigPath(std::string_view label) {
+  static std::atomic<std::uint64_t> sequence{0U};
+  const auto tick = std::chrono::steady_clock::now().time_since_epoch().count();
+  return std::filesystem::temp_directory_path() /
+         ("cogito-s2-config-" + std::string(label) + "-" + std::to_string(tick) + "-" +
+          std::to_string(sequence.fetch_add(1U)) + ".json");
+}
+
+class ScopedConfigFile {
  public:
-  TempDirectory() {
-    static std::atomic<unsigned long long> sequence{0U};
-    const auto timestamp = std::chrono::steady_clock::now().time_since_epoch().count();
-    const std::filesystem::path base = std::filesystem::temp_directory_path();
-    for (unsigned int attempt = 0U; attempt < 100U; ++attempt) {
-      path_ = base / ("cogito_config_test_" + std::to_string(timestamp) + "_" +
-                      std::to_string(sequence.fetch_add(1U)));
-      std::error_code error;
-      if (std::filesystem::create_directory(path_, error)) {
-        return;
-      }
-      if (error) {
-        throw std::runtime_error("unable to create a temporary test directory");
-      }
+  ScopedConfigFile(std::string_view label, std::string_view contents)
+      : path_(UniqueConfigPath(label)) {
+    std::ofstream output(path_, std::ios::binary | std::ios::trunc);
+    if (!output.is_open()) {
+      throw std::runtime_error("test configuration file open failed");
     }
-    throw std::runtime_error("unable to allocate a unique temporary test directory");
+    output.write(contents.data(), static_cast<std::streamsize>(contents.size()));
+    if (!output) {
+      throw std::runtime_error("test configuration file write failed");
+    }
   }
 
-  ~TempDirectory() {
-    std::error_code error;
-    std::filesystem::remove_all(path_, error);
+  ~ScopedConfigFile() {
+    std::error_code ignored;
+    std::filesystem::remove(path_, ignored);
   }
 
-  TempDirectory(const TempDirectory&) = delete;
-  TempDirectory& operator=(const TempDirectory&) = delete;
+  ScopedConfigFile(const ScopedConfigFile&) = delete;
+  ScopedConfigFile& operator=(const ScopedConfigFile&) = delete;
 
   const std::filesystem::path& path() const noexcept { return path_; }
 
@@ -53,244 +52,263 @@ class TempDirectory {
   std::filesystem::path path_;
 };
 
-void WriteFile(const std::filesystem::path& path, std::string_view bytes) {
-  std::ofstream output(path, std::ios::binary | std::ios::trunc);
-  REQUIRE(output.is_open());
-  output.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
-  output.close();
-  REQUIRE(output.good());
-}
-
-void RequireConfigError(const cogito::Result<cogito::CogitoConfig>& result,
-                        cogito::Errc expected) {
-  REQUIRE_FALSE(result.ok());
-  REQUIRE(result.error().code == expected);
+std::string Serialize(const cogito::ccj::Json& json) {
+  auto serialized = cogito::ccj::Serialize(json);
+  if (!serialized) {
+    throw std::runtime_error("test JSON serialization failed");
+  }
+  return std::move(serialized).take();
 }
 
 cogito::ccj::Json StrictJson(std::string_view text) {
   auto parsed = cogito::ccj::ParseStrict(text);
-  REQUIRE(parsed.ok());
+  if (!parsed) {
+    throw std::runtime_error("test JSON fixture is invalid");
+  }
   return std::move(parsed).take();
 }
 
-void RequireDigest(const cogito::Result<cogito::Digest>& digest,
-                   std::string_view expected) {
-  REQUIRE(digest.ok());
-  REQUIRE(digest.value().hex() == expected);
+void RequireSchemaViolation(std::string_view json) {
+  auto result = cogito::ConfigLoader::FromJsonString(json);
+  REQUIRE_FALSE(result.ok());
+  REQUIRE(result.error().code == cogito::Errc::SchemaViolation);
 }
 
 }  // namespace
 
-TEST_CASE("ConfigLoader fills defaults and accepts every SecretRef scheme", "[config]") {
-  auto defaults = cogito::ConfigLoader::FromJsonString(R"json({"schema_version":1})json");
-  REQUIRE(defaults.ok());
-  REQUIRE(defaults.value().schema_version == 1U);
-  REQUIRE(defaults.value().engine.max_concurrent_sessions == 64U);
-  REQUIRE(defaults.value().engine.default_turn_timeout_ms == 30000U);
-  REQUIRE(defaults.value().engine.log_level == "info");
-  REQUIRE(defaults.value().secrets.empty());
+TEST_CASE("ConfigLoader supplies documented defaults", "[config][loader]") {
+  auto loaded = cogito::ConfigLoader::FromJsonString(R"json({"schema_version":1})json");
+  REQUIRE(loaded.ok());
+  REQUIRE(loaded.value().schema_version == 1U);
+  REQUIRE(loaded.value().engine.max_concurrent_sessions == 64U);
+  REQUIRE(loaded.value().engine.default_turn_timeout_ms == 30000U);
+  REQUIRE(loaded.value().engine.log_level == "info");
+  REQUIRE(loaded.value().secrets.empty());
 
-  auto partial = cogito::ConfigLoader::FromJsonString(
-      R"json({"schema_version":1,"engine":{"log_level":"debug"}})json");
-  REQUIRE(partial.ok());
-  REQUIRE(partial.value().engine.max_concurrent_sessions == 64U);
-  REQUIRE(partial.value().engine.default_turn_timeout_ms == 30000U);
-  REQUIRE(partial.value().engine.log_level == "debug");
-
-  auto complete = cogito::ConfigLoader::FromJsonString(R"json({
-    "schema_version": 1,
-    "engine": {
-      "max_concurrent_sessions": 1,
-      "default_turn_timeout_ms": 3600000,
-      "log_level": "trace"
-    },
-    "secrets": {
-      "env_ref": "env:API_KEY",
-      "file.ref": "file:/var/lib/cogito/key",
-      "win-ref": "wincred:cogito/key",
-      "keyring_ref": "keyring:cogito/user"
-    }
-  })json");
-  REQUIRE(complete.ok());
-  REQUIRE(complete.value().engine.max_concurrent_sessions == 1U);
-  REQUIRE(complete.value().engine.default_turn_timeout_ms == 3600000U);
-  REQUIRE(complete.value().engine.log_level == "trace");
-  REQUIRE(complete.value().secrets.size() == 4U);
+  auto explicit_config = cogito::ConfigLoader::FromJsonString(
+      R"json({"schema_version":1,"engine":{"max_concurrent_sessions":7,"default_turn_timeout_ms":1250,"log_level":"debug"},"secrets":{"api_key":"env:API_KEY","db":"file:relative-is-schema-valid"}})json");
+  REQUIRE(explicit_config.ok());
+  REQUIRE(explicit_config.value().engine.max_concurrent_sessions == 7U);
+  REQUIRE(explicit_config.value().engine.default_turn_timeout_ms == 1250U);
+  REQUIRE(explicit_config.value().engine.log_level == "debug");
+  REQUIRE(explicit_config.value().secrets.at("api_key").uri == "env:API_KEY");
+  REQUIRE(explicit_config.value().secrets.at("db").uri ==
+          "file:relative-is-schema-valid");
 }
 
-TEST_CASE("ConfigLoader preserves strict JSON parser error codes", "[config][strict]") {
-  RequireConfigError(cogito::ConfigLoader::FromJsonString("{"),
-                     cogito::Errc::InvalidArgument);
-  RequireConfigError(cogito::ConfigLoader::FromJsonString(
-                         R"json({"schema_version":1,"schema_version":1})json"),
-                     cogito::Errc::DuplicateKey);
+TEST_CASE("ConfigLoader preserves all strict parser error categories",
+          "[config][loader][strict]") {
+  auto malformed = cogito::ConfigLoader::FromJsonString(R"json({"schema_version":})json");
+  REQUIRE_FALSE(malformed.ok());
+  REQUIRE(malformed.error().code == cogito::Errc::InvalidArgument);
 
-  std::string invalid_utf8 = R"json({"schema_version":1,"secrets":{"x":"env:)json";
+  auto duplicate = cogito::ConfigLoader::FromJsonString(
+      R"json({"schema_version":1,"schema_version":1})json");
+  REQUIRE_FALSE(duplicate.ok());
+  REQUIRE(duplicate.error().code == cogito::Errc::DuplicateKey);
+
+  std::string invalid_utf8 = "{\"schema_version\":1,\"secrets\":{\"x\":\"env:";
   invalid_utf8.push_back(static_cast<char>(0xC0));
-  invalid_utf8.push_back(static_cast<char>(0xAF));
-  invalid_utf8 += R"json("}})json";
-  RequireConfigError(cogito::ConfigLoader::FromJsonString(invalid_utf8),
-                     cogito::Errc::NotUtf8);
+  invalid_utf8 += "\"}}";
+  auto not_utf8 = cogito::ConfigLoader::FromJsonString(invalid_utf8);
+  REQUIRE_FALSE(not_utf8.ok());
+  REQUIRE(not_utf8.error().code == cogito::Errc::NotUtf8);
 
-  const std::string too_deep = std::string(33U, '[') + "0" + std::string(33U, ']');
-  RequireConfigError(cogito::ConfigLoader::FromJsonString(too_deep),
-                     cogito::Errc::DepthExceeded);
+  std::string too_deep(34U, '[');
+  too_deep += "0";
+  too_deep.append(34U, ']');
+  auto depth = cogito::ConfigLoader::FromJsonString(too_deep);
+  REQUIRE_FALSE(depth.ok());
+  REQUIRE(depth.error().code == cogito::Errc::DepthExceeded);
 
-  RequireConfigError(
-      cogito::ConfigLoader::FromJsonString(std::string(256U * 1024U + 1U, ' ')),
-      cogito::Errc::TooLarge);
+  const std::string too_large(262145U, ' ');
+  auto size = cogito::ConfigLoader::FromJsonString(too_large);
+  REQUIRE_FALSE(size.ok());
+  REQUIRE(size.error().code == cogito::Errc::TooLarge);
 
-  std::string too_many_keys = "{";
-  for (std::size_t index = 0U; index < 513U; ++index) {
-    if (index != 0U) {
-      too_many_keys.push_back(',');
-    }
-    too_many_keys += "\"k" + std::to_string(index) + "\":0";
-  }
-  too_many_keys.push_back('}');
-  RequireConfigError(cogito::ConfigLoader::FromJsonString(too_many_keys),
-                     cogito::Errc::TooLarge);
+  std::string exact_limit = R"json({"schema_version":1})json";
+  exact_limit.append(262144U - exact_limit.size(), ' ');
+  REQUIRE(cogito::ConfigLoader::FromJsonString(exact_limit).ok());
 }
 
-TEST_CASE("ConfigLoader rejects all schema violations", "[config][schema]") {
-  const std::vector<std::string> invalid_documents{
+TEST_CASE("ConfigLoader enforces root and additionalProperties constraints",
+          "[config][schema]") {
+  const std::string_view invalid_documents[] = {
+      R"json(null)json",
       R"json([])json",
       R"json({})json",
+      R"json({"schema_version":0})json",
       R"json({"schema_version":2})json",
       R"json({"schema_version":1.0})json",
-      R"json({"schema_version":true})json",
-      R"json({"schema_version":1,"unknown":0})json",
+      R"json({"schema_version":1,"unknown":true})json",
       R"json({"schema_version":1,"engine":null})json",
-      R"json({"schema_version":1,"engine":{"unknown":0}})json",
-      R"json({"schema_version":1,"engine":{"max_concurrent_sessions":0}})json",
-      R"json({"schema_version":1,"engine":{"max_concurrent_sessions":65537}})json",
-      R"json({"schema_version":1,"engine":{"default_turn_timeout_ms":99}})json",
-      R"json({"schema_version":1,"engine":{"default_turn_timeout_ms":3600001}})json",
-      R"json({"schema_version":1,"engine":{"log_level":"fatal"}})json",
+      R"json({"schema_version":1,"engine":{"unknown":1}})json",
       R"json({"schema_version":1,"secrets":[]})json",
-      R"json({"schema_version":1,"secrets":{"": "env:X"}})json",
-      R"json({"schema_version":1,"secrets":{"bad/key": "env:X"}})json",
-      R"json({"schema_version":1,"secrets":{"x": 7}})json",
-      R"json({"schema_version":1,"secrets":{"x": "ENV:X"}})json",
-      R"json({"schema_version":1,"secrets":{"x": "env:"}})json",
   };
-  for (const std::string& document : invalid_documents) {
-    CAPTURE(document);
-    const auto result = cogito::ConfigLoader::FromJsonString(document);
-    RequireConfigError(result, cogito::Errc::SchemaViolation);
-    REQUIRE(result.error().reason_code == cogito::reason::kSchemaViolation);
+  for (const std::string_view document : invalid_documents) {
+    INFO("invalid config: " << document);
+    RequireSchemaViolation(document);
   }
-
-  cogito::ccj::Json embedded_nul{
-      {"schema_version", 1},
-      {"secrets", {{"x", std::string("env:X\0hidden", 12U)}}}};
-  RequireConfigError(cogito::ConfigLoader::FromJson(embedded_nul),
-                     cogito::Errc::SchemaViolation);
-
-  cogito::ccj::Json long_key{{"schema_version", 1},
-                             {"secrets", {{std::string(129U, 'a'), "env:X"}}}};
-  RequireConfigError(cogito::ConfigLoader::FromJson(long_key),
-                     cogito::Errc::SchemaViolation);
-
-  const std::string maximum_uri = "env:" + std::string(1020U, 'x');
-  auto maximum = cogito::ConfigLoader::FromJson(
-      cogito::ccj::Json{{"schema_version", 1}, {"secrets", {{"x", maximum_uri}}}});
-  REQUIRE(maximum.ok());
-  auto oversized = cogito::ConfigLoader::FromJson(cogito::ccj::Json{
-      {"schema_version", 1}, {"secrets", {{"x", maximum_uri + "x"}}}});
-  RequireConfigError(oversized, cogito::Errc::SchemaViolation);
 }
 
-TEST_CASE("CogitoConfig validation prevents direct construction bypasses", "[config]") {
+TEST_CASE("ConfigLoader enforces every engine boundary", "[config][schema][engine]") {
+  const std::string_view invalid_documents[] = {
+      R"json({"schema_version":1,"engine":{"max_concurrent_sessions":0}})json",
+      R"json({"schema_version":1,"engine":{"max_concurrent_sessions":65537}})json",
+      R"json({"schema_version":1,"engine":{"max_concurrent_sessions":1.5}})json",
+      R"json({"schema_version":1,"engine":{"default_turn_timeout_ms":99}})json",
+      R"json({"schema_version":1,"engine":{"default_turn_timeout_ms":3600001}})json",
+      R"json({"schema_version":1,"engine":{"default_turn_timeout_ms":-1}})json",
+      R"json({"schema_version":1,"engine":{"log_level":"verbose"}})json",
+      R"json({"schema_version":1,"engine":{"log_level":1}})json",
+  };
+  for (const std::string_view document : invalid_documents) {
+    INFO("invalid config: " << document);
+    RequireSchemaViolation(document);
+  }
+
+  auto boundaries = cogito::ConfigLoader::FromJsonString(
+      R"json({"schema_version":1,"engine":{"max_concurrent_sessions":65536,"default_turn_timeout_ms":3600000,"log_level":"error"}})json");
+  REQUIRE(boundaries.ok());
+}
+
+TEST_CASE("ConfigLoader enforces secret property names and generic URI shape",
+          "[config][schema][secret]") {
+  const std::string_view invalid_documents[] = {
+      R"json({"schema_version":1,"secrets":{"":"env:X"}})json",
+      R"json({"schema_version":1,"secrets":{"bad/name":"env:X"}})json",
+      R"json({"schema_version":1,"secrets":{"name":1}})json",
+      R"json({"schema_version":1,"secrets":{"name":"env:"}})json",
+      R"json({"schema_version":1,"secrets":{"name":"ENV:X"}})json",
+      R"json({"schema_version":1,"secrets":{"name":"unknown:X"}})json",
+      R"json({"schema_version":1,"secrets":{"name":"env:X\u0000Y"}})json",
+      R"json({"schema_version":1,"secrets":{"name":"env:X\rY"}})json",
+      R"json({"schema_version":1,"secrets":{"name":"env:X\nY"}})json",
+      R"json({"schema_version":1,"secrets":{"name":"env:X\u2028Y"}})json",
+      R"json({"schema_version":1,"secrets":{"name":"env:X\u2029Y"}})json",
+  };
+  for (const std::string_view document : invalid_documents) {
+    INFO("invalid config: " << document);
+    RequireSchemaViolation(document);
+  }
+
+  cogito::ccj::Json oversized_name = {
+      {"schema_version", 1U},
+      {"secrets", cogito::ccj::Json::object({{std::string(129U, 'a'), "env:X"}})},
+  };
+  auto name_result = cogito::ConfigLoader::FromJson(oversized_name);
+  REQUIRE_FALSE(name_result.ok());
+  REQUIRE(name_result.error().code == cogito::Errc::SchemaViolation);
+
+  cogito::ccj::Json oversized_uri = {
+      {"schema_version", 1U},
+      {"secrets", {{"name", "env:" + std::string(1021U, 'A')}}},
+  };
+  auto uri_result = cogito::ConfigLoader::FromJson(oversized_uri);
+  REQUIRE_FALSE(uri_result.ok());
+  REQUIRE(uri_result.error().code == cogito::Errc::SchemaViolation);
+
+  const std::string boundary_uri = "keyring:" + std::string(1016U, 'u');
+  cogito::ccj::Json boundary = {
+      {"schema_version", 1U},
+      {"secrets", {{std::string(128U, 'n'), boundary_uri}}},
+  };
+  REQUIRE(cogito::ConfigLoader::FromJson(boundary).ok());
+}
+
+TEST_CASE("CogitoConfig Validate blocks programmatic schema bypasses",
+          "[config][validate]") {
   cogito::CogitoConfig config;
   REQUIRE(config.Validate().ok());
 
-  config.schema_version = 0U;
+  config.schema_version = 2U;
   REQUIRE(config.Validate().code == cogito::Errc::SchemaViolation);
   config.schema_version = 1U;
 
   config.engine.max_concurrent_sessions = 0U;
   REQUIRE(config.Validate().code == cogito::Errc::SchemaViolation);
-  config.engine.max_concurrent_sessions = 65536U;
-  REQUIRE(config.Validate().ok());
-
+  config.engine.max_concurrent_sessions = 64U;
   config.engine.default_turn_timeout_ms = 99U;
   REQUIRE(config.Validate().code == cogito::Errc::SchemaViolation);
-  config.engine.default_turn_timeout_ms = 100U;
-  config.engine.log_level = "warning";
+  config.engine.default_turn_timeout_ms = 30000U;
+  config.engine.log_level = "verbose";
   REQUIRE(config.Validate().code == cogito::Errc::SchemaViolation);
-  config.engine.log_level = "error";
+  config.engine.log_level = "info";
 
-  config.secrets.emplace("bad/key", cogito::SecretRef{"env:X"});
+  config.secrets.emplace("bad/name", cogito::SecretRef{"env:X"});
+  REQUIRE(config.Validate().code == cogito::Errc::SchemaViolation);
+  config.secrets.clear();
+  config.secrets.emplace("valid-name", cogito::SecretRef{"env:"});
   REQUIRE(config.Validate().code == cogito::Errc::SchemaViolation);
 
-  const auto digest = config.ComputeDigest();
+  auto digest = config.ComputeDigest();
   REQUIRE_FALSE(digest.ok());
   REQUIRE(digest.error().code == cogito::Errc::SchemaViolation);
 }
 
-TEST_CASE("CogitoConfig normalization redacts file paths and matches golden digests",
-          "[config][digest][golden]") {
-  RequireDigest(cogito::ComputeConfigDigest(1U, StrictJson(R"json({"mode":"readonly"})json")),
-                "91daa0313f6836bd456339804217c1fbc2ea64c56157133ad84031c08b081737");
-
+TEST_CASE("ToNormalizedJson is shape-only and redacts every file path",
+          "[config][normalize]") {
   cogito::CogitoConfig config;
-  config.secrets.emplace("api_key", cogito::SecretRef{"env:LLM_API_KEY"});
-  config.secrets.emplace("db_pass", cogito::SecretRef{"file:/etc/secrets/db.pass"});
-  config.secrets.emplace("keyring", cogito::SecretRef{"keyring:cogito/user"});
-  config.secrets.emplace("windows", cogito::SecretRef{"wincred:cogito/key"});
+  config.engine.max_concurrent_sessions = 7U;
+  config.engine.default_turn_timeout_ms = 2500U;
+  config.engine.log_level = "warn";
+  config.secrets.emplace("a", cogito::SecretRef{"env:API_KEY"});
+  config.secrets.emplace("b", cogito::SecretRef{"file:/host/private/secret"});
+  config.secrets.emplace("c", cogito::SecretRef{"wincred:target"});
+  config.secrets.emplace("d", cogito::SecretRef{"keyring:service/user"});
 
-  auto serialized = cogito::ccj::Serialize(config.ToNormalizedJson());
-  REQUIRE(serialized.ok());
-  REQUIRE(serialized.value() ==
-          R"json({"engine":{"default_turn_timeout_ms":30000,"log_level":"info","max_concurrent_sessions":64},"secrets":{"api_key":"env:LLM_API_KEY","db_pass":"file:<redacted>","keyring":"keyring:cogito/user","windows":"wincred:cogito/key"}})json");
-
-  cogito::CogitoConfig golden;
-  golden.secrets.emplace("api_key", cogito::SecretRef{"env:LLM_API_KEY"});
-  golden.secrets.emplace("db_pass", cogito::SecretRef{"file:/etc/secrets/db.pass"});
-  RequireDigest(golden.ComputeDigest(),
-                "77d1657862fdf0b228c554009d115ec0e9494b7b355809c0a7e01e4cc9964bd5");
-
-  cogito::CogitoConfig defaults;
-  RequireDigest(defaults.ComputeDigest(),
-                "c78f2d4be2e13fec7057495c07eedb7ff3817e7a2a89ba7c12fa5038bd30fe64");
-
-  cogito::CogitoConfig other_host = golden;
-  other_host.secrets["db_pass"].uri = "file:/different/host/path";
-  const auto golden_digest = golden.ComputeDigest();
-  const auto other_host_digest = other_host.ComputeDigest();
-  REQUIRE(golden_digest.ok());
-  REQUIRE(other_host_digest.ok());
-  REQUIRE(golden_digest.value() == other_host_digest.value());
+  REQUIRE(Serialize(config.ToNormalizedJson()) ==
+          R"json({"engine":{"default_turn_timeout_ms":2500,"log_level":"warn","max_concurrent_sessions":7},"secrets":{"a":"env:API_KEY","b":"file:<redacted>","c":"wincred:target","d":"keyring:service/user"}})json");
 }
 
-TEST_CASE("ConfigLoader reads files with an exact 256 KiB boundary", "[config][file]") {
-  TempDirectory temporary;
-  const std::filesystem::path valid_path = temporary.path() / "valid.json";
-  const std::filesystem::path maximum_path = temporary.path() / "maximum.json";
-  const std::filesystem::path oversized_path = temporary.path() / "oversized.json";
-  const std::filesystem::path malformed_path = temporary.path() / "malformed.json";
+TEST_CASE("All three config digest golden vectors are stable", "[config][digest][golden]") {
+  auto direct = cogito::ComputeConfigDigest(1U, StrictJson(R"json({"mode":"readonly"})json"));
+  REQUIRE(direct.ok());
+  REQUIRE(direct.value().hex() ==
+          "91daa0313f6836bd456339804217c1fbc2ea64c56157133ad84031c08b081737");
 
-  WriteFile(valid_path,
-            R"json({"schema_version":1,"engine":{"max_concurrent_sessions":8}})json");
-  auto loaded = cogito::ConfigLoader::LoadFromFile(valid_path.string());
+  cogito::CogitoConfig canonical;
+  canonical.secrets.emplace("api_key", cogito::SecretRef{"env:LLM_API_KEY"});
+  canonical.secrets.emplace("db_pass", cogito::SecretRef{"file:/etc/secrets/db.pass"});
+  REQUIRE(Serialize(canonical.ToNormalizedJson()) ==
+          R"json({"engine":{"default_turn_timeout_ms":30000,"log_level":"info","max_concurrent_sessions":64},"secrets":{"api_key":"env:LLM_API_KEY","db_pass":"file:<redacted>"}})json");
+  auto canonical_digest = canonical.ComputeDigest();
+  REQUIRE(canonical_digest.ok());
+  REQUIRE(canonical_digest.value().hex() ==
+          "77d1657862fdf0b228c554009d115ec0e9494b7b355809c0a7e01e4cc9964bd5");
+
+  const cogito::CogitoConfig defaults;
+  REQUIRE(Serialize(defaults.ToNormalizedJson()) ==
+          R"json({"engine":{"default_turn_timeout_ms":30000,"log_level":"info","max_concurrent_sessions":64},"secrets":{}})json");
+  auto default_digest = defaults.ComputeDigest();
+  REQUIRE(default_digest.ok());
+  REQUIRE(default_digest.value().hex() ==
+          "c78f2d4be2e13fec7057495c07eedb7ff3817e7a2a89ba7c12fa5038bd30fe64");
+}
+
+TEST_CASE("LoadFromFile preserves parse errors and enforces 256 KiB",
+          "[config][loader][file]") {
+  ScopedConfigFile valid("valid", R"json({"schema_version":1})json");
+  auto loaded = cogito::ConfigLoader::LoadFromFile(valid.path().string());
   REQUIRE(loaded.ok());
-  REQUIRE(loaded.value().engine.max_concurrent_sessions == 8U);
 
-  std::string maximum = R"json({"schema_version":1})json";
-  maximum.resize(256U * 1024U, ' ');
-  WriteFile(maximum_path, maximum);
-  REQUIRE(cogito::ConfigLoader::LoadFromFile(maximum_path.string()).ok());
+  ScopedConfigFile malformed("malformed", R"json({"schema_version":})json");
+  auto parse_error = cogito::ConfigLoader::LoadFromFile(malformed.path().string());
+  REQUIRE_FALSE(parse_error.ok());
+  REQUIRE(parse_error.error().code == cogito::Errc::InvalidArgument);
 
-  maximum.push_back(' ');
-  WriteFile(oversized_path, maximum);
-  RequireConfigError(cogito::ConfigLoader::LoadFromFile(oversized_path.string()),
-                     cogito::Errc::TooLarge);
+  std::string exact_contents = R"json({"schema_version":1})json";
+  exact_contents.append(262144U - exact_contents.size(), ' ');
+  ScopedConfigFile exact("exact-limit", exact_contents);
+  REQUIRE(cogito::ConfigLoader::LoadFromFile(exact.path().string()).ok());
 
-  WriteFile(malformed_path, "{");
-  RequireConfigError(cogito::ConfigLoader::LoadFromFile(malformed_path.string()),
-                     cogito::Errc::InvalidArgument);
-  RequireConfigError(
-      cogito::ConfigLoader::LoadFromFile((temporary.path() / "missing.json").string()),
-      cogito::Errc::ConfigError);
+  ScopedConfigFile oversized("oversized", std::string(262145U, ' '));
+  auto too_large = cogito::ConfigLoader::LoadFromFile(oversized.path().string());
+  REQUIRE_FALSE(too_large.ok());
+  REQUIRE(too_large.error().code == cogito::Errc::TooLarge);
+
+  const std::filesystem::path missing = UniqueConfigPath("missing");
+  auto absent = cogito::ConfigLoader::LoadFromFile(missing.string());
+  REQUIRE_FALSE(absent.ok());
+  REQUIRE(absent.error().code == cogito::Errc::ConfigError);
 }

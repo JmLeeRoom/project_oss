@@ -2,84 +2,145 @@
 
 #include "cogito/fsm.hpp"
 
-#include <algorithm>
 #include <array>
 #include <cstddef>
-#include <cstdint>
 #include <queue>
 #include <string>
-#include <string_view>
 #include <utility>
-#include <vector>
 
 #include "cogito/clock.hpp"
-#include "cogito/tool.hpp"
 
 namespace cogito {
 namespace {
 
-constexpr std::size_t kStateCount =
-    static_cast<std::size_t>(State::Cancelled) + 1U;
-constexpr std::size_t kEventCount =
-    static_cast<std::size_t>(Event::StartNextTurn) + 1U;
+constexpr std::array<State, 10> kAllStates{{
+    State::Idle,
+    State::Infer,
+    State::Propose,
+    State::Gate,
+    State::AwaitApproval,
+    State::Execute,
+    State::Observe,
+    State::Done,
+    State::Failed,
+    State::Cancelled,
+}};
 
-constexpr bool IsKnown(State state) noexcept {
-  return static_cast<std::size_t>(state) < kStateCount;
+constexpr std::array<Event, 19> kAllEvents{{
+    Event::UserInput,
+    Event::InferOk,
+    Event::ProviderError,
+    Event::BudgetExhausted,
+    Event::Cancel,
+    Event::NoAction,
+    Event::OneAction,
+    Event::MultipleActions,
+    Event::Deny,
+    Event::Ask,
+    Event::Allow,
+    Event::AuditError,
+    Event::Approved,
+    Event::RejectedOrExpired,
+    Event::ExecOk,
+    Event::ExecErrorOrIndeterminate,
+    Event::Continue,
+    Event::CompleteOrLimit,
+    Event::StartNextTurn,
+}};
+
+constexpr std::array<State, 6> kR1States{{
+    State::Infer,
+    State::Propose,
+    State::Gate,
+    State::AwaitApproval,
+    State::Execute,
+    State::Observe,
+}};
+
+constexpr std::array<State, 5> kR2States{{
+    State::Infer,
+    State::Propose,
+    State::Gate,
+    State::AwaitApproval,
+    State::Observe,
+}};
+
+constexpr std::array<State, 3> kTerminalStates{{
+    State::Done,
+    State::Failed,
+    State::Cancelled,
+}};
+
+constexpr std::array<Event, 2> kR4Events{{
+    Event::AuditError,
+    Event::Cancel,
+}};
+
+constexpr std::size_t StateIndex(State state) noexcept {
+  return static_cast<std::size_t>(state);
 }
 
-constexpr bool IsKnown(Event event) noexcept {
-  return static_cast<std::size_t>(event) < kEventCount;
+constexpr bool IsKnownState(State state) noexcept {
+  return StateIndex(state) < kAllStates.size();
 }
 
-bool IsAuditFailureSource(State state) noexcept {
-  return state == State::Infer || state == State::Propose || state == State::Gate ||
-         state == State::AwaitApproval || state == State::Execute ||
-         state == State::Observe;
+bool Contains(const std::array<State, 6>& states, State value) noexcept {
+  for (State state : states) {
+    if (state == value) {
+      return true;
+    }
+  }
+  return false;
 }
 
-bool IsCancellationSource(State state) noexcept {
-  return state == State::Infer || state == State::Propose || state == State::Gate ||
-         state == State::AwaitApproval || state == State::Observe;
+bool Contains(const std::array<State, 5>& states, State value) noexcept {
+  for (State state : states) {
+    if (state == value) {
+      return true;
+    }
+  }
+  return false;
 }
 
-void FillTransitionRecord(TransitionRecord* out,
-                          bool applied,
-                          State from,
-                          State to,
-                          Event event,
-                          const std::string& cause,
-                          const ActionId& action_id,
-                          TurnId turn,
-                          const Clock& clock) {
+void FillRecord(TransitionRecord* out,
+                bool applied,
+                State from,
+                State to,
+                Event event,
+                const std::string& cause,
+                const ActionId& action_id,
+                TurnId turn,
+                const Clock& clock) {
   if (out == nullptr) {
     return;
   }
-
-  TransitionRecord record;
-  record.applied = applied;
-  record.from = from;
-  record.to = to;
-  record.ev = event;
-  record.cause = cause;
-  record.action_id = action_id;
-  record.turn_id = turn;
-  record.wall_utc = clock.NowUtcRfc3339();
-  record.monotonic_ns = clock.MonotonicNs();
-  record.process_epoch_id = ProcessEpochId();
-  *out = std::move(record);
+  out->applied = applied;
+  out->from = from;
+  out->to = to;
+  out->ev = event;
+  out->cause = cause;
+  out->action_id = action_id;
+  out->turn_id = turn;
+  out->wall_utc = clock.NowUtcRfc3339();
+  out->monotonic_ns = clock.MonotonicNs();
+  out->process_epoch_id.clear();
 }
 
-Error IntegrityError(std::string message, std::string detail = {}) {
-  return Error{Errc::Internal, reason::kInvalidFsmState, std::move(message),
-               std::move(detail)};
+ccj::Json TransitionJson(State from,
+                         Event event,
+                         State to,
+                         const char* kind,
+                         const char* rule) {
+  return ccj::Json{{"event", ToString(event)},
+                   {"from", ToString(from)},
+                   {"kind", kind},
+                   {"rule", rule},
+                   {"to", ToString(to)}};
 }
 
-struct DumpRow {
-  State from;
-  Event event;
-  State to;
-  const char* type;
-};
+Error IntegrityError(std::string message, std::string detail) {
+  return Error{Errc::Internal, {}, std::move(message), std::move(detail)};
+}
 
 }  // namespace
 
@@ -106,7 +167,7 @@ const char* ToString(State state) noexcept {
     case State::Cancelled:
       return "Cancelled";
   }
-  return "unknown";
+  return "UnknownState";
 }
 
 const char* ToString(Event event) noexcept {
@@ -150,42 +211,34 @@ const char* ToString(Event event) noexcept {
     case Event::StartNextTurn:
       return "StartNextTurn";
   }
-  return "unknown";
+  return "UnknownEvent";
 }
 
 bool IsTerminal(State state) noexcept {
   return state == State::Done || state == State::Failed || state == State::Cancelled;
 }
 
-bool Fsm::ResolveUniversal(State from,
-                           Event event,
-                           State* to,
-                           bool* noop) noexcept {
-  if (to == nullptr || noop == nullptr) {
-    return false;
-  }
-
-  *to = from;
+bool Fsm::ResolveUniversal(State from, Event event, State* to, bool* noop) noexcept {
   *noop = false;
 
-  if (IsTerminal(from) &&
-      (event == Event::AuditError || event == Event::Cancel)) {
+  if (from == State::Idle && event == Event::Cancel) {
+    *to = State::Idle;
     *noop = true;
     return true;
   }
 
-  if (event == Event::Cancel &&
-      (from == State::Idle || from == State::Execute)) {
+  if (IsTerminal(from) && (event == Event::AuditError || event == Event::Cancel)) {
+    *to = from;
     *noop = true;
     return true;
   }
 
-  if (event == Event::AuditError && IsAuditFailureSource(from)) {
+  if (event == Event::AuditError && Contains(kR1States, from)) {
     *to = State::Failed;
     return true;
   }
 
-  if (event == Event::Cancel && IsCancellationSource(from)) {
+  if (event == Event::Cancel && Contains(kR2States, from)) {
     *to = State::Cancelled;
     return true;
   }
@@ -199,153 +252,96 @@ Error Fsm::Dispatch(Event event,
                     TurnId turn,
                     const Clock& clock,
                     TransitionRecord* out) {
-  const State from = s_;
-  State to = from;
+  const State previous = s_;
+  State target = previous;
   bool found = false;
   bool noop = false;
 
   for (const Transition& transition : kTransitions) {
-    if (transition.from == from && transition.ev == event) {
-      to = transition.to;
+    if (transition.from == previous && transition.ev == event) {
+      target = transition.to;
       found = true;
       break;
     }
   }
 
   if (!found) {
-    found = ResolveUniversal(from, event, &to, &noop);
+    found = ResolveUniversal(previous, event, &target, &noop);
   }
 
   if (!found) {
-    const std::string detail =
-        std::string(ToString(from)) + "/" + ToString(event);
-    const std::string undefined_cause = "undefined_transition:" + detail;
     s_ = State::Failed;
-    FillTransitionRecord(out, true, from, State::Failed, event, undefined_cause,
-                         action_id, turn, clock);
-    return Error{Errc::Internal, reason::kInvalidFsmState,
-                 "undefined FSM transition", detail};
+    const std::string recorded_cause = cause.empty() ? "undefined_transition" : cause;
+    FillRecord(out, true, previous, State::Failed, event, recorded_cause, action_id, turn, clock);
+    return Error{Errc::Internal,
+                 {},
+                 "정의되지 않은 상태 전이입니다.",
+                 std::string(ToString(previous)) + "/" + ToString(event)};
   }
 
   if (noop) {
-    FillTransitionRecord(out, false, from, from, event, cause, action_id, turn,
-                         clock);
+    FillRecord(out, false, previous, previous, event, cause, action_id, turn, clock);
     return Error::Ok();
   }
 
-  s_ = to;
-  FillTransitionRecord(out, true, from, to, event, cause, action_id, turn, clock);
+  s_ = target;
+  FillRecord(out, true, previous, target, event, cause, action_id, turn, clock);
   return Error::Ok();
 }
 
 ccj::Json Fsm::DumpTable() {
-  std::vector<DumpRow> rows;
-  rows.reserve(kTransitions.size() + 11U);
+  ccj::Json result = ccj::Json::array();
 
   for (const Transition& transition : kTransitions) {
-    rows.push_back(
-        DumpRow{transition.from, transition.ev, transition.to, "explicit"});
+    result.push_back(
+        TransitionJson(transition.from, transition.ev, transition.to, "explicit", "explicit"));
   }
 
-  for (std::size_t state_index = 0; state_index < kStateCount; ++state_index) {
-    const State from = static_cast<State>(state_index);
-    for (std::size_t event_index = 0; event_index < kEventCount; ++event_index) {
-      const Event event = static_cast<Event>(event_index);
-      State to = from;
-      bool noop = false;
-      if (ResolveUniversal(from, event, &to, &noop) && !noop) {
-        rows.push_back(DumpRow{from, event, to, "universal"});
-      }
+  result.push_back(TransitionJson(State::Idle, Event::Cancel, State::Idle, "universal", "R0"));
+
+  for (State state : kR1States) {
+    result.push_back(TransitionJson(state, Event::AuditError, State::Failed, "universal", "R1"));
+  }
+
+  for (State state : kR2States) {
+    result.push_back(TransitionJson(state, Event::Cancel, State::Cancelled, "universal", "R2"));
+  }
+
+  for (State state : kTerminalStates) {
+    for (Event event : kR4Events) {
+      result.push_back(TransitionJson(state, event, state, "universal", "R4"));
     }
   }
 
-  std::sort(rows.begin(), rows.end(), [](const DumpRow& lhs, const DumpRow& rhs) {
-    const std::string_view lhs_from(ToString(lhs.from));
-    const std::string_view rhs_from(ToString(rhs.from));
-    if (lhs_from != rhs_from) {
-      return lhs_from < rhs_from;
-    }
-
-    const std::string_view lhs_event(ToString(lhs.event));
-    const std::string_view rhs_event(ToString(rhs.event));
-    if (lhs_event != rhs_event) {
-      return lhs_event < rhs_event;
-    }
-
-    const std::string_view lhs_to(ToString(lhs.to));
-    const std::string_view rhs_to(ToString(rhs.to));
-    if (lhs_to != rhs_to) {
-      return lhs_to < rhs_to;
-    }
-    return std::string_view(lhs.type) < std::string_view(rhs.type);
-  });
-
-  ccj::Json output = ccj::Json::array();
-  for (const DumpRow& row : rows) {
-    ccj::Json item = ccj::Json::object();
-    item["from"] = ToString(row.from);
-    item["ev"] = ToString(row.event);
-    item["to"] = ToString(row.to);
-    item["type"] = row.type;
-    output.push_back(std::move(item));
-  }
-  return output;
-}
-
-Event Fsm::MapToolResultStatus(ToolResultStatus status) noexcept {
-  switch (status) {
-    case ToolResultStatus::Ok:
-      return Event::ExecOk;
-    case ToolResultStatus::Error:
-    case ToolResultStatus::Timeout:
-    case ToolResultStatus::Cancelled:
-    case ToolResultStatus::Indeterminate:
-      return Event::ExecErrorOrIndeterminate;
-  }
-  return Event::ExecErrorOrIndeterminate;
+  return result;
 }
 
 Error Fsm::VerifyTableIntegrity() {
-  for (const Transition& transition : kTransitions) {
-    if (!IsKnown(transition.from) || !IsKnown(transition.ev) ||
-        !IsKnown(transition.to)) {
-      return IntegrityError("FSM table contains an unknown enum value");
-    }
-    if (transition.ev == Event::AuditError || transition.ev == Event::Cancel) {
-      return IntegrityError("explicit transition overlaps a universal event",
-                            std::string(ToString(transition.from)) + "/" +
-                                ToString(transition.ev));
-    }
-
-    State universal_to = transition.from;
-    bool noop = false;
-    if (ResolveUniversal(transition.from, transition.ev, &universal_to, &noop)) {
-      return IntegrityError("explicit transition overlaps a universal rule",
-                            std::string(ToString(transition.from)) + "/" +
-                                ToString(transition.ev));
-    }
-  }
-
   for (std::size_t i = 0; i < kTransitions.size(); ++i) {
-    for (std::size_t j = i + 1U; j < kTransitions.size(); ++j) {
-      if (kTransitions[i].from == kTransitions[j].from &&
-          kTransitions[i].ev == kTransitions[j].ev) {
-        return IntegrityError("duplicate explicit FSM transition",
-                              std::string(ToString(kTransitions[i].from)) + "/" +
-                                  ToString(kTransitions[i].ev));
+    const Transition& current = kTransitions[i];
+    if (!IsKnownState(current.from) || !IsKnownState(current.to)) {
+      return IntegrityError("전이표에 알 수 없는 상태가 있습니다.", ToString(current.from));
+    }
+    if (current.ev == Event::AuditError || current.ev == Event::Cancel) {
+      return IntegrityError("명시 전이가 보편 규칙과 충돌합니다.", ToString(current.ev));
+    }
+    for (std::size_t j = i + 1; j < kTransitions.size(); ++j) {
+      if (current.from == kTransitions[j].from && current.ev == kTransitions[j].ev) {
+        return IntegrityError("중복된 명시 전이가 있습니다.",
+                              std::string(ToString(current.from)) + "/" + ToString(current.ev));
       }
     }
   }
 
-  std::array<bool, kStateCount> reached{};
+  std::array<bool, kAllStates.size()> reachable{};
   std::queue<State> pending;
-  reached[static_cast<std::size_t>(State::Idle)] = true;
+  reachable[StateIndex(State::Idle)] = true;
   pending.push(State::Idle);
 
-  const auto enqueue = [&reached, &pending](State state) {
-    const std::size_t index = static_cast<std::size_t>(state);
-    if (!reached[index]) {
-      reached[index] = true;
+  const auto enqueue = [&reachable, &pending](State state) {
+    const std::size_t index = StateIndex(state);
+    if (index < reachable.size() && !reachable[index]) {
+      reachable[index] = true;
       pending.push(state);
     }
   };
@@ -360,40 +356,32 @@ Error Fsm::VerifyTableIntegrity() {
       }
     }
 
-    for (std::size_t event_index = 0; event_index < kEventCount; ++event_index) {
-      State to = from;
+    for (Event event : kAllEvents) {
+      State target = from;
       bool noop = false;
-      if (ResolveUniversal(from, static_cast<Event>(event_index), &to, &noop) &&
-          !noop) {
-        enqueue(to);
+      if (ResolveUniversal(from, event, &target, &noop) && !noop) {
+        enqueue(target);
       }
     }
   }
 
-  for (std::size_t state_index = 0; state_index < kStateCount; ++state_index) {
-    const State state = static_cast<State>(state_index);
-    if (!IsTerminal(state) && !reached[state_index]) {
-      return IntegrityError("non-terminal FSM state is unreachable from Idle",
-                            ToString(state));
+  for (State state : kR1States) {
+    if (!reachable[StateIndex(state)]) {
+      return IntegrityError("Idle에서 비종료 상태에 도달할 수 없습니다.", ToString(state));
     }
   }
 
-  for (std::size_t state_index = 0; state_index < kStateCount; ++state_index) {
-    const State terminal = static_cast<State>(state_index);
-    if (!IsTerminal(terminal)) {
-      continue;
-    }
-
-    std::size_t reset_count = 0;
+  for (State terminal : kTerminalStates) {
+    bool returns_to_idle = false;
     for (const Transition& transition : kTransitions) {
       if (transition.from == terminal && transition.ev == Event::StartNextTurn &&
           transition.to == State::Idle) {
-        ++reset_count;
+        returns_to_idle = true;
+        break;
       }
     }
-    if (reset_count != 1U) {
-      return IntegrityError("terminal FSM state lacks one StartNextTurn reset",
-                            ToString(terminal));
+    if (!returns_to_idle) {
+      return IntegrityError("종료 상태가 다음 턴의 Idle로 복귀하지 못합니다.", ToString(terminal));
     }
   }
 

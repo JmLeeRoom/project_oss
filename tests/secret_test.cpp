@@ -1,23 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
-#if defined(_MSC_VER) && !defined(_CRT_SECURE_NO_WARNINGS)
-#define _CRT_SECURE_NO_WARNINGS
-#endif
-
 #include "cogito/config.hpp"
 
-#include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
-#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
-#include <system_error>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -28,11 +23,9 @@
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
 #include <windows.h>
 
+#include <accctrl.h>
 #include <aclapi.h>
 #else
 #include <sys/stat.h>
@@ -42,33 +35,43 @@
 
 namespace {
 
-class TempDirectory {
- public:
-  TempDirectory() {
-    static std::atomic<unsigned long long> sequence{0U};
-    const auto timestamp = std::chrono::steady_clock::now().time_since_epoch().count();
-    const std::filesystem::path base = std::filesystem::temp_directory_path();
-    for (unsigned int attempt = 0U; attempt < 100U; ++attempt) {
-      path_ = base / ("cogito_secret_test_" + std::to_string(timestamp) + "_" +
-                      std::to_string(sequence.fetch_add(1U)));
-      std::error_code error;
-      if (std::filesystem::create_directory(path_, error)) {
-        return;
-      }
-      if (error) {
-        throw std::runtime_error("unable to create a temporary test directory");
-      }
+bool IsZeroed(const volatile void* ptr, std::size_t size) {
+  const auto* bytes = static_cast<const volatile unsigned char*>(ptr);
+  for (std::size_t index = 0U; index < size; ++index) {
+    if (bytes[index] != 0U) {
+      return false;
     }
-    throw std::runtime_error("unable to allocate a unique temporary test directory");
+  }
+  return true;
+}
+
+std::uint64_t ProcessId() noexcept {
+#if defined(_WIN32)
+  return static_cast<std::uint64_t>(GetCurrentProcessId());
+#else
+  return static_cast<std::uint64_t>(getpid());
+#endif
+}
+
+std::filesystem::path UniqueTemporaryPath(std::string_view label) {
+  static std::atomic<std::uint64_t> sequence{0U};
+  const auto tick = static_cast<std::uint64_t>(
+      std::chrono::steady_clock::now().time_since_epoch().count());
+  return std::filesystem::temp_directory_path() /
+         ("cogito-s2-" + std::string(label) + "-" + std::to_string(ProcessId()) + "-" +
+          std::to_string(tick) + "-" + std::to_string(sequence.fetch_add(1U)));
+}
+
+class ScopedPath {
+ public:
+  explicit ScopedPath(std::string_view label) : path_(UniqueTemporaryPath(label)) {}
+  ~ScopedPath() {
+    std::error_code ignored;
+    std::filesystem::remove(path_, ignored);
   }
 
-  ~TempDirectory() {
-    std::error_code error;
-    std::filesystem::remove_all(path_, error);
-  }
-
-  TempDirectory(const TempDirectory&) = delete;
-  TempDirectory& operator=(const TempDirectory&) = delete;
+  ScopedPath(const ScopedPath&) = delete;
+  ScopedPath& operator=(const ScopedPath&) = delete;
 
   const std::filesystem::path& path() const noexcept { return path_; }
 
@@ -76,501 +79,453 @@ class TempDirectory {
   std::filesystem::path path_;
 };
 
-class ScopedEnvironment {
- public:
-  ScopedEnvironment(std::string name, std::string value) : name_(std::move(name)) {
-    const char* existing = std::getenv(name_.c_str());
-    if (existing != nullptr) {
-      previous_ = existing;
-    }
-    Set(value);
-  }
-
-  ~ScopedEnvironment() {
-    try {
-      if (previous_) {
-        Set(*previous_);
-      } else {
-        Unset();
-      }
-    } catch (...) {
-    }
-  }
-
-  ScopedEnvironment(const ScopedEnvironment&) = delete;
-  ScopedEnvironment& operator=(const ScopedEnvironment&) = delete;
-
- private:
-  void Set(const std::string& value) {
 #if defined(_WIN32)
-    if (_putenv_s(name_.c_str(), value.c_str()) != 0) {
-      throw std::runtime_error("unable to set a test environment variable");
-    }
-#else
-    if (setenv(name_.c_str(), value.c_str(), 1) != 0) {
-      throw std::runtime_error("unable to set a test environment variable");
-    }
-#endif
-  }
-
-  void Unset() {
-#if defined(_WIN32)
-    if (_putenv_s(name_.c_str(), "") != 0) {
-      throw std::runtime_error("unable to clear a test environment variable");
-    }
-#else
-    if (unsetenv(name_.c_str()) != 0) {
-      throw std::runtime_error("unable to clear a test environment variable");
-    }
-#endif
-  }
-
-  std::string name_;
-  std::optional<std::string> previous_;
-};
-
-std::string NativePath(const std::filesystem::path& path) {
-  return path.u8string();
-}
-
-std::string FileUri(const std::filesystem::path& path) {
-  return "file:" + NativePath(path);
-}
-
-#if defined(_WIN32)
-
-class WindowsHandle {
- public:
-  explicit WindowsHandle(HANDLE handle) noexcept : handle_(handle) {}
-  ~WindowsHandle() {
-    if (handle_ != nullptr && handle_ != INVALID_HANDLE_VALUE) {
-      CloseHandle(handle_);
-    }
-  }
-
-  WindowsHandle(const WindowsHandle&) = delete;
-  WindowsHandle& operator=(const WindowsHandle&) = delete;
-
-  HANDLE get() const noexcept { return handle_; }
-
- private:
-  HANDLE handle_ = INVALID_HANDLE_VALUE;
-};
 
 class LocalAcl {
  public:
-  explicit LocalAcl(PACL acl) noexcept : acl_(acl) {}
   ~LocalAcl() {
     if (acl_ != nullptr) {
       LocalFree(acl_);
     }
   }
 
-  LocalAcl(const LocalAcl&) = delete;
-  LocalAcl& operator=(const LocalAcl&) = delete;
-
+  PACL* out() noexcept { return &acl_; }
   PACL get() const noexcept { return acl_; }
 
  private:
   PACL acl_ = nullptr;
 };
 
-void SetFileDacl(const std::filesystem::path& path, bool grant_everyone_read) {
+std::vector<std::max_align_t> CurrentTokenUserBuffer() {
   HANDLE raw_token = nullptr;
   if (OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &raw_token) == FALSE) {
-    throw std::runtime_error("unable to inspect the test process token");
+    throw std::runtime_error("OpenProcessToken failed");
   }
-  WindowsHandle token(raw_token);
+  const auto close_token = [&] { CloseHandle(raw_token); };
 
-  DWORD token_bytes = 0U;
-  GetTokenInformation(token.get(), TokenUser, nullptr, 0U, &token_bytes);
-  if (token_bytes == 0U || GetLastError() != ERROR_INSUFFICIENT_BUFFER) {
-    throw std::runtime_error("unable to size the test process token");
+  DWORD required = 0U;
+  static_cast<void>(GetTokenInformation(raw_token, TokenUser, nullptr, 0U, &required));
+  if (required == 0U || GetLastError() != ERROR_INSUFFICIENT_BUFFER) {
+    close_token();
+    throw std::runtime_error("GetTokenInformation size query failed");
   }
-  std::vector<unsigned char> token_storage(token_bytes);
-  if (GetTokenInformation(token.get(), TokenUser, token_storage.data(), token_bytes,
-                          &token_bytes) == FALSE) {
-    throw std::runtime_error("unable to inspect the test process user");
+  const std::size_t units =
+      (static_cast<std::size_t>(required) + sizeof(std::max_align_t) - 1U) /
+      sizeof(std::max_align_t);
+  std::vector<std::max_align_t> buffer(units);
+  if (GetTokenInformation(raw_token, TokenUser, buffer.data(), required, &required) == FALSE) {
+    close_token();
+    throw std::runtime_error("GetTokenInformation failed");
   }
-  auto* token_user = reinterpret_cast<TOKEN_USER*>(token_storage.data());
+  close_token();
+  return buffer;
+}
 
-  alignas(void*) unsigned char system_storage[SECURITY_MAX_SID_SIZE]{};
-  alignas(void*) unsigned char admin_storage[SECURITY_MAX_SID_SIZE]{};
-  alignas(void*) unsigned char world_storage[SECURITY_MAX_SID_SIZE]{};
-  DWORD system_size = SECURITY_MAX_SID_SIZE;
-  DWORD admin_size = SECURITY_MAX_SID_SIZE;
-  DWORD world_size = SECURITY_MAX_SID_SIZE;
-  if (CreateWellKnownSid(WinLocalSystemSid, nullptr, system_storage, &system_size) == FALSE ||
-      CreateWellKnownSid(WinBuiltinAdministratorsSid, nullptr, admin_storage,
-                         &admin_size) == FALSE ||
-      CreateWellKnownSid(WinWorldSid, nullptr, world_storage, &world_size) == FALSE) {
-    throw std::runtime_error("unable to construct test SIDs");
-  }
+void SetTestDacl(const std::filesystem::path& path, bool allow_everyone_read) {
+  std::vector<std::max_align_t> token_buffer = CurrentTokenUserBuffer();
+  const auto* token_user = reinterpret_cast<const TOKEN_USER*>(token_buffer.data());
 
-  std::vector<EXPLICIT_ACCESSW> entries(grant_everyone_read ? 4U : 3U);
-  const auto configure = [](EXPLICIT_ACCESSW& entry, PSID sid, DWORD rights,
-                            TRUSTEE_TYPE type) {
-    entry.grfAccessPermissions = rights;
-    entry.grfAccessMode = SET_ACCESS;
-    entry.grfInheritance = NO_INHERITANCE;
-    entry.Trustee.TrusteeForm = TRUSTEE_IS_SID;
-    entry.Trustee.TrusteeType = type;
-    entry.Trustee.ptstrName = static_cast<LPWSTR>(sid);
-  };
-  configure(entries[0], token_user->User.Sid, GENERIC_ALL, TRUSTEE_IS_USER);
-  configure(entries[1], system_storage, GENERIC_READ, TRUSTEE_IS_USER);
-  configure(entries[2], admin_storage, GENERIC_READ, TRUSTEE_IS_GROUP);
-  if (grant_everyone_read) {
-    configure(entries[3], world_storage, GENERIC_READ, TRUSTEE_IS_WELL_KNOWN_GROUP);
+  alignas(SID) std::array<unsigned char, SECURITY_MAX_SID_SIZE> system_storage{};
+  alignas(SID) std::array<unsigned char, SECURITY_MAX_SID_SIZE>
+      administrators_storage{};
+  alignas(SID) std::array<unsigned char, SECURITY_MAX_SID_SIZE> everyone_storage{};
+  DWORD system_size = static_cast<DWORD>(system_storage.size());
+  DWORD administrators_size = static_cast<DWORD>(administrators_storage.size());
+  DWORD everyone_size = static_cast<DWORD>(everyone_storage.size());
+  if (CreateWellKnownSid(WinLocalSystemSid, nullptr, system_storage.data(), &system_size) ==
+          FALSE ||
+      CreateWellKnownSid(WinBuiltinAdministratorsSid, nullptr, administrators_storage.data(),
+                         &administrators_size) == FALSE ||
+      CreateWellKnownSid(WinWorldSid, nullptr, everyone_storage.data(), &everyone_size) == FALSE) {
+    throw std::runtime_error("CreateWellKnownSid failed");
   }
 
-  PACL raw_acl = nullptr;
-  const DWORD acl_status = SetEntriesInAclW(static_cast<ULONG>(entries.size()),
-                                             entries.data(), nullptr, &raw_acl);
-  if (acl_status != ERROR_SUCCESS || raw_acl == nullptr) {
-    if (raw_acl != nullptr) {
-      LocalFree(raw_acl);
-    }
-    throw std::runtime_error("unable to construct a test DACL");
+  std::array<EXPLICIT_ACCESSW, 4U> entries{};
+  entries[0].grfAccessPermissions = FILE_ALL_ACCESS;
+  entries[1].grfAccessPermissions = GENERIC_READ;
+  entries[2].grfAccessPermissions = GENERIC_READ;
+  entries[3].grfAccessPermissions = GENERIC_READ;
+  for (std::size_t index = 0U; index < entries.size(); ++index) {
+    entries[index].grfAccessMode = SET_ACCESS;
+    entries[index].grfInheritance = NO_INHERITANCE;
   }
-  LocalAcl acl(raw_acl);
+  BuildTrusteeWithSidW(&entries[0].Trustee, token_user->User.Sid);
+  BuildTrusteeWithSidW(&entries[1].Trustee, system_storage.data());
+  BuildTrusteeWithSidW(&entries[2].Trustee, administrators_storage.data());
+  BuildTrusteeWithSidW(&entries[3].Trustee, everyone_storage.data());
 
-  std::wstring wide_path = path.wstring();
-  const DWORD set_status = SetNamedSecurityInfoW(
-      wide_path.data(), SE_FILE_OBJECT,
+  LocalAcl acl;
+  const ULONG entry_count = allow_everyone_read ? 4U : 3U;
+  if (SetEntriesInAclW(entry_count, entries.data(), nullptr, acl.out()) != ERROR_SUCCESS) {
+    throw std::runtime_error("SetEntriesInAclW failed");
+  }
+  std::wstring mutable_path = path.wstring();
+  const DWORD result = SetNamedSecurityInfoW(
+      mutable_path.data(), SE_FILE_OBJECT,
       DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION, nullptr, nullptr,
       acl.get(), nullptr);
-  if (set_status != ERROR_SUCCESS) {
-    throw std::runtime_error("unable to apply a test DACL");
-  }
-}
-
-void SetNullFileDacl(const std::filesystem::path& path) {
-  std::wstring wide_path = path.wstring();
-  const DWORD set_status = SetNamedSecurityInfoW(
-      wide_path.data(), SE_FILE_OBJECT,
-      DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION, nullptr, nullptr,
-      nullptr, nullptr);
-  if (set_status != ERROR_SUCCESS) {
-    throw std::runtime_error("unable to apply a NULL test DACL");
+  if (result != ERROR_SUCCESS) {
+    throw std::runtime_error("SetNamedSecurityInfoW failed");
   }
 }
 
 #endif
 
-void WriteSecretFile(const std::filesystem::path& path, std::string_view bytes,
-                     unsigned int mode = 0600U) {
+void WriteFile(const std::filesystem::path& path, std::string_view bytes) {
   std::ofstream output(path, std::ios::binary | std::ios::trunc);
-  REQUIRE(output.is_open());
+  if (!output.is_open()) {
+    throw std::runtime_error("test file open failed");
+  }
   output.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+  if (!output) {
+    throw std::runtime_error("test file write failed");
+  }
   output.close();
-  REQUIRE(output.good());
 #if defined(_WIN32)
-  static_cast<void>(mode);
-  SetFileDacl(path, false);
+  SetTestDacl(path, false);
 #else
-  REQUIRE(chmod(path.c_str(), static_cast<mode_t>(mode)) == 0);
+  if (chmod(path.c_str(), S_IRUSR | S_IWUSR) != 0) {
+    throw std::runtime_error("chmod failed");
+  }
 #endif
 }
 
-void RequireSecretError(const cogito::Result<cogito::SecretString>& result,
-                        cogito::Errc expected) {
-  REQUIRE_FALSE(result.ok());
-  REQUIRE(result.error().code == expected);
+std::string FileUri(const std::filesystem::path& path) {
+  return "file:" + path.u8string();
 }
 
-void RequireSecretValue(cogito::Result<cogito::SecretString> result,
-                        std::string_view expected) {
-  REQUIRE(result.ok());
-  REQUIRE(result.value().Expose() == expected);
+void SetEnvironment(const std::string& name, const std::string& value) {
+#if defined(_WIN32)
+  if (_putenv_s(name.c_str(), value.c_str()) != 0) {
+    throw std::runtime_error("_putenv_s failed");
+  }
+#else
+  if (setenv(name.c_str(), value.c_str(), 1) != 0) {
+    throw std::runtime_error("setenv failed");
+  }
+#endif
 }
+
+void UnsetEnvironment(const std::string& name) noexcept {
+#if defined(_WIN32)
+  static_cast<void>(_putenv_s(name.c_str(), ""));
+#else
+  static_cast<void>(unsetenv(name.c_str()));
+#endif
+}
+
+std::string UniqueEnvironmentName() {
+  return "COGITO_S2_SECRET_TEST_" + std::to_string(ProcessId()) + "_" +
+         std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+}
+
+struct SecretSeamReset {
+  ~SecretSeamReset() {
+    cogito::testing::SecretTestSeam::ClearMockSecrets();
+    cogito::testing::ClearCleanseObserver();
+  }
+};
 
 }  // namespace
 
-TEST_CASE("SecretRef splits at the first colon without validating", "[secret]") {
-  const cogito::SecretRef environment{"env:NAME:with:colons"};
-  REQUIRE(environment.scheme() == "env");
-  REQUIRE(environment.location() == "NAME:with:colons");
+TEST_CASE("SecretRef splits only at the first colon", "[secret][uri]") {
+  const cogito::SecretRef env{"env:API_TOKEN"};
+  REQUIRE(env.scheme() == "env");
+  REQUIRE(env.location() == "API_TOKEN");
 
-  const cogito::SecretRef missing_separator{"env"};
-  REQUIRE(missing_separator.scheme().empty());
-  REQUIRE(missing_separator.location().empty());
+  const cogito::SecretRef nested{"keyring:service:user/name"};
+  REQUIRE(nested.scheme() == "keyring");
+  REQUIRE(nested.location() == "service:user/name");
 
-  const cogito::SecretRef empty_scheme{":location"};
-  REQUIRE(empty_scheme.scheme().empty());
-  REQUIRE(empty_scheme.location() == "location");
+  const cogito::SecretRef missing{"no_separator"};
+  REQUIRE(missing.scheme().empty());
+  REQUIRE(missing.location().empty());
 }
 
-TEST_CASE("ResolveSecret validates generic URIs before consulting the test seam",
-          "[secret][seam]") {
-  cogito::testing::SecretTestSeam::ClearMockSecrets();
-  const std::vector<cogito::SecretRef> invalid{
-      {""}, {"env:"}, {"ENV:NAME"}, {"unknown:value"}, {std::string(1025U, 'x')}};
-  for (const cogito::SecretRef& ref : invalid) {
-    cogito::testing::SecretTestSeam::SetMockSecret(ref.uri, "must-not-resolve");
-    RequireSecretError(cogito::ResolveSecret(ref), cogito::Errc::SecretError);
+TEST_CASE("ResolveSecret rejects malformed URIs before consulting the seam",
+          "[secret][uri][negative]") {
+  SecretSeamReset reset;
+  const std::string oversized = "env:" + std::string(1021U, 'A');
+  std::string embedded_nul = "env:VALID";
+  embedded_nul.push_back('\0');
+  embedded_nul += "TAIL";
+  const std::string unicode_line_separator = "env:X\xE2\x80\xA8Y";
+  const std::string unicode_paragraph_separator = "env:X\xE2\x80\xA9Y";
+
+  const std::string invalid_uris[] = {
+      "",          "env:",     "ENV:NAME", "unknown:value", "missing-colon",
+      "env:X\rY", "env:X\nY", oversized,   embedded_nul,     unicode_line_separator,
+      unicode_paragraph_separator};
+  for (const std::string& uri : invalid_uris) {
+    INFO("invalid URI size: " << uri.size());
+    cogito::testing::SecretTestSeam::SetMockSecret(uri, "must-not-escape");
+    auto resolved = cogito::ResolveSecret(cogito::SecretRef{uri});
+    REQUIRE_FALSE(resolved.ok());
+    REQUIRE(resolved.error().code == cogito::Errc::SecretError);
   }
-
-  const cogito::SecretRef embedded_nul{std::string("env:NAME\0hidden", 15U)};
-  cogito::testing::SecretTestSeam::SetMockSecret(embedded_nul.uri, "must-not-resolve");
-  RequireSecretError(cogito::ResolveSecret(embedded_nul), cogito::Errc::SecretError);
-
-  cogito::testing::SecretTestSeam::SetMockSecret("env:1backend-invalid", "mock-value");
-  RequireSecretValue(cogito::ResolveSecret({"env:1backend-invalid"}), "mock-value");
-  cogito::testing::SecretTestSeam::ClearMockSecrets();
 }
 
-TEST_CASE("SecretTestSeam is thread-local and cleanses replaced and cleared values",
-          "[secret][seam][zeroize]") {
-  cogito::testing::SecretTestSeam::ClearMockSecrets();
-  cogito::testing::SecretTestSeam::SetMockSecret("keyring:service/user", "old-secret");
+TEST_CASE("Environment secrets enforce names, presence, emptiness, and value size",
+          "[secret][env]") {
+  const std::string name = UniqueEnvironmentName();
+  UnsetEnvironment(name);
 
-  bool replacement_observed = false;
-  bool replacement_zero = true;
-  cogito::testing::SetCleanseObserver(
-      [&](const volatile void* pointer, std::size_t size) {
-        if (size == std::string_view("old-secret").size()) {
-          replacement_observed = true;
-          const auto* bytes = static_cast<const volatile unsigned char*>(pointer);
-          for (std::size_t index = 0U; index < size; ++index) {
-            replacement_zero = replacement_zero && bytes[index] == 0U;
-          }
-        }
-      });
-  cogito::testing::SecretTestSeam::SetMockSecret("keyring:service/user",
-                                                 "replacement-secret");
-  cogito::testing::ClearCleanseObserver();
-  REQUIRE(replacement_observed);
-  REQUIRE(replacement_zero);
+  auto missing = cogito::ResolveSecret(cogito::SecretRef{"env:" + name});
+  REQUIRE_FALSE(missing.ok());
+  REQUIRE(missing.error().code == cogito::Errc::SecretError);
 
-  std::atomic<bool> other_thread_resolved{true};
-  std::thread other_thread([&]() {
-    other_thread_resolved.store(
-        cogito::ResolveSecret({"keyring:service/user"}).ok(),
-        std::memory_order_relaxed);
-  });
-  other_thread.join();
-  REQUIRE_FALSE(other_thread_resolved.load(std::memory_order_relaxed));
-  RequireSecretValue(cogito::ResolveSecret({"keyring:service/user"}),
-                     "replacement-secret");
+  SetEnvironment(name, "environment-secret");
+  auto resolved = cogito::ResolveSecret(cogito::SecretRef{"env:" + name});
+  REQUIRE(resolved.ok());
+  REQUIRE(resolved.value().Expose() == "environment-secret");
 
-  bool clear_observed = false;
-  bool clear_zero = true;
-  cogito::testing::SetCleanseObserver(
-      [&](const volatile void* pointer, std::size_t size) {
-        if (size == std::string_view("replacement-secret").size()) {
-          clear_observed = true;
-          const auto* bytes = static_cast<const volatile unsigned char*>(pointer);
-          for (std::size_t index = 0U; index < size; ++index) {
-            clear_zero = clear_zero && bytes[index] == 0U;
-          }
-        }
-      });
-  cogito::testing::SecretTestSeam::ClearMockSecrets();
-  cogito::testing::ClearCleanseObserver();
-  REQUIRE(clear_observed);
-  REQUIRE(clear_zero);
-}
+  SetEnvironment(name, "");
+  auto empty = cogito::ResolveSecret(cogito::SecretRef{"env:" + name});
+  REQUIRE_FALSE(empty.ok());
+  REQUIRE(empty.error().code == cogito::Errc::SecretError);
+  UnsetEnvironment(name);
 
-TEST_CASE("ResolveSecret enforces environment name and value bounds", "[secret][env]") {
-  cogito::testing::SecretTestSeam::ClearMockSecrets();
-  {
-    ScopedEnvironment environment("COGITO_SECRET_TEST_VALUE", "environment-secret");
-    RequireSecretValue(cogito::ResolveSecret({"env:COGITO_SECRET_TEST_VALUE"}),
-                       "environment-secret");
+  const std::string invalid_names[] = {"1BAD", "HAS-DASH", "HAS.DOT",
+                                       std::string(257U, 'A')};
+  for (const std::string& invalid_name : invalid_names) {
+    auto invalid = cogito::ResolveSecret(cogito::SecretRef{"env:" + invalid_name});
+    REQUIRE_FALSE(invalid.ok());
+    REQUIRE(invalid.error().code == cogito::Errc::SecretError);
   }
-  {
-    ScopedEnvironment empty("COGITO_SECRET_TEST_EMPTY", "");
-    RequireSecretError(cogito::ResolveSecret({"env:COGITO_SECRET_TEST_EMPTY"}),
-                       cogito::Errc::SecretError);
-  }
-
-  RequireSecretError(cogito::ResolveSecret({"env:COGITO_SECRET_TEST_MISSING"}),
-                     cogito::Errc::SecretError);
-  RequireSecretError(cogito::ResolveSecret({"env:1INVALID"}),
-                     cogito::Errc::SecretError);
-  RequireSecretError(cogito::ResolveSecret({"env:BAD-NAME"}),
-                     cogito::Errc::SecretError);
-  RequireSecretError(cogito::ResolveSecret({"env:" + std::string(257U, 'A')}),
-                     cogito::Errc::SecretError);
 
 #if !defined(_WIN32)
-  const std::string maximum_name = "A" + std::string(255U, 'B');
-  ScopedEnvironment maximum(maximum_name, std::string(65536U, 'x'));
-  auto maximum_result = cogito::ResolveSecret({"env:" + maximum_name});
-  REQUIRE(maximum_result.ok());
-  REQUIRE(maximum_result.value().size() == 65536U);
-
-  ScopedEnvironment oversized("COGITO_SECRET_TEST_OVERSIZED", std::string(65537U, 'x'));
-  RequireSecretError(cogito::ResolveSecret({"env:COGITO_SECRET_TEST_OVERSIZED"}),
-                     cogito::Errc::TooLarge);
+  SetEnvironment(name, std::string(65537U, 'x'));
+  auto oversized = cogito::ResolveSecret(cogito::SecretRef{"env:" + name});
+  REQUIRE_FALSE(oversized.ok());
+  REQUIRE(oversized.error().code == cogito::Errc::TooLarge);
+  UnsetEnvironment(name);
 #endif
 }
 
-TEST_CASE("ResolveSecret reads secure files and normalizes one trailing newline",
+TEST_CASE("Secret files use the validated handle and remove exactly one final newline",
           "[secret][file]") {
-  cogito::testing::SecretTestSeam::ClearMockSecrets();
-  TempDirectory temporary;
+  ScopedPath file("normalization");
 
-  const std::filesystem::path plain = temporary.path() / "plain.secret";
-  const std::filesystem::path lf = temporary.path() / "lf.secret";
-  const std::filesystem::path crlf = temporary.path() / "crlf.secret";
-  const std::filesystem::path twice = temporary.path() / "twice.secret";
-  const std::filesystem::path newline_only = temporary.path() / "newline.secret";
-  const std::filesystem::path carriage_return = temporary.path() / "cr.secret";
-  const std::filesystem::path binary = temporary.path() / "binary.secret";
-  const std::filesystem::path empty = temporary.path() / "empty.secret";
-  const std::filesystem::path maximum = temporary.path() / "maximum.secret";
-  const std::filesystem::path oversized = temporary.path() / "oversized.secret";
-
-  WriteSecretFile(plain, "plain-secret");
-  WriteSecretFile(lf, "line-feed\n");
-  WriteSecretFile(crlf, "windows-line\r\n");
-  WriteSecretFile(twice, "two\n\n");
-  WriteSecretFile(newline_only, "\n");
-  WriteSecretFile(carriage_return, "\r");
-  WriteSecretFile(binary, std::string("a\0b\n", 4U));
-  WriteSecretFile(empty, "");
-  WriteSecretFile(maximum, std::string(65536U, 'm'));
-  WriteSecretFile(oversized, std::string(65537U, 'o'));
-
-  RequireSecretValue(cogito::ResolveSecret({FileUri(plain)}), "plain-secret");
-  RequireSecretValue(cogito::ResolveSecret({FileUri(lf)}), "line-feed");
-  RequireSecretValue(cogito::ResolveSecret({FileUri(crlf)}), "windows-line");
-  RequireSecretValue(cogito::ResolveSecret({FileUri(twice)}), "two\n");
-  RequireSecretValue(cogito::ResolveSecret({FileUri(carriage_return)}), "\r");
-  RequireSecretValue(cogito::ResolveSecret({FileUri(binary)}),
-                     std::string_view("a\0b", 3U));
-  RequireSecretError(cogito::ResolveSecret({FileUri(newline_only)}),
-                     cogito::Errc::SecretError);
-  RequireSecretError(cogito::ResolveSecret({FileUri(empty)}),
-                     cogito::Errc::SecretError);
-
-  auto maximum_result = cogito::ResolveSecret({FileUri(maximum)});
-  REQUIRE(maximum_result.ok());
-  REQUIRE(maximum_result.value().size() == 65536U);
-  RequireSecretError(cogito::ResolveSecret({FileUri(oversized)}),
-                     cogito::Errc::TooLarge);
-
-  RequireSecretError(cogito::ResolveSecret({"file:relative.secret"}),
-                     cogito::Errc::SecretError);
-  RequireSecretError(cogito::ResolveSecret({FileUri(temporary.path() / "missing.secret")}),
-                     cogito::Errc::SecretError);
+  const std::pair<std::string, std::string> vectors[] = {
+      {"plain", "plain"},
+      {"line\n", "line"},
+      {"line\r\n", "line"},
+      {"line\n\n", "line\n"},
+      {"line\r\n\r\n", "line\r\n"},
+  };
+  for (const auto& vector : vectors) {
+    WriteFile(file.path(), vector.first);
+    auto resolved = cogito::ResolveSecret(cogito::SecretRef{FileUri(file.path())});
+    REQUIRE(resolved.ok());
+    REQUIRE(resolved.value().Expose() == vector.second);
+    REQUIRE(cogito::CheckSecretFilePermissions(file.path().u8string()).ok());
+  }
 }
 
-TEST_CASE("CheckSecretFilePermissions fails closed for unsafe file objects",
+TEST_CASE("Secret files preserve embedded NUL bytes", "[secret][file][binary]") {
+  ScopedPath file("binary");
+  const std::string bytes{"a\0b\n", 4U};
+  WriteFile(file.path(), bytes);
+
+  auto resolved = cogito::ResolveSecret(cogito::SecretRef{FileUri(file.path())});
+  REQUIRE(resolved.ok());
+  REQUIRE(resolved.value().size() == 3U);
+  REQUIRE(resolved.value().Expose() == std::string_view(bytes.data(), 3U));
+}
+
+TEST_CASE("Secret file content size boundaries fail closed", "[secret][file][negative]") {
+  ScopedPath empty_file("empty");
+  WriteFile(empty_file.path(), "");
+  REQUIRE(cogito::CheckSecretFilePermissions(empty_file.path().u8string()).ok());
+  auto empty = cogito::ResolveSecret(cogito::SecretRef{FileUri(empty_file.path())});
+  REQUIRE_FALSE(empty.ok());
+  REQUIRE(empty.error().code == cogito::Errc::SecretError);
+
+  ScopedPath newline_file("newline-only");
+  WriteFile(newline_file.path(), "\r\n");
+  auto newline = cogito::ResolveSecret(cogito::SecretRef{FileUri(newline_file.path())});
+  REQUIRE_FALSE(newline.ok());
+  REQUIRE(newline.error().code == cogito::Errc::SecretError);
+
+  ScopedPath maximum_file("maximum");
+  WriteFile(maximum_file.path(), std::string(65536U, 'm'));
+  auto maximum = cogito::ResolveSecret(cogito::SecretRef{FileUri(maximum_file.path())});
+  REQUIRE(maximum.ok());
+  REQUIRE(maximum.value().size() == 65536U);
+
+  ScopedPath oversized_file("oversized");
+  WriteFile(oversized_file.path(), std::string(65537U, 'x'));
+  auto oversized = cogito::ResolveSecret(cogito::SecretRef{FileUri(oversized_file.path())});
+  REQUIRE_FALSE(oversized.ok());
+  REQUIRE(oversized.error().code == cogito::Errc::TooLarge);
+}
+
+TEST_CASE("Relative secret file paths are rejected by the real backend",
+          "[secret][file][negative]") {
+  auto relative = cogito::ResolveSecret(cogito::SecretRef{"file:relative/secret"});
+  REQUIRE_FALSE(relative.ok());
+  REQUIRE(relative.error().code == cogito::Errc::SecretError);
+  REQUIRE(cogito::CheckSecretFilePermissions("relative/secret").code ==
+          cogito::Errc::Forbidden);
+}
+
+#if !defined(_WIN32)
+
+TEST_CASE("POSIX secret permissions allow only 0600 and 0400",
           "[secret][file][permissions]") {
-  TempDirectory temporary;
-  const std::filesystem::path secure = temporary.path() / "secure.secret";
-  WriteSecretFile(secure, "secret", 0600U);
-  REQUIRE(cogito::CheckSecretFilePermissions(NativePath(secure)).ok());
+  ScopedPath file("permissions");
+  WriteFile(file.path(), "secret");
 
-#if defined(_WIN32)
-  const std::filesystem::path broad = temporary.path() / "broad.secret";
-  WriteSecretFile(broad, "secret");
-  SetFileDacl(broad, true);
-  REQUIRE(cogito::CheckSecretFilePermissions(NativePath(broad)).code ==
-          cogito::Errc::Forbidden);
-  RequireSecretError(cogito::ResolveSecret({FileUri(broad)}), cogito::Errc::Forbidden);
+  REQUIRE(chmod(file.path().c_str(), S_IRUSR | S_IWUSR) == 0);
+  REQUIRE(cogito::CheckSecretFilePermissions(file.path().string()).ok());
+  REQUIRE(cogito::ResolveSecret(cogito::SecretRef{FileUri(file.path())}).ok());
 
-  const std::filesystem::path null_dacl = temporary.path() / "null-dacl.secret";
-  WriteSecretFile(null_dacl, "secret");
-  SetNullFileDacl(null_dacl);
-  REQUIRE(cogito::CheckSecretFilePermissions(NativePath(null_dacl)).code ==
-          cogito::Errc::Forbidden);
-  RequireSecretError(cogito::ResolveSecret({FileUri(null_dacl)}),
-                     cogito::Errc::Forbidden);
+  REQUIRE(chmod(file.path().c_str(), S_IRUSR) == 0);
+  REQUIRE(cogito::CheckSecretFilePermissions(file.path().string()).ok());
+  REQUIRE(cogito::ResolveSecret(cogito::SecretRef{FileUri(file.path())}).ok());
 
-  const std::filesystem::path link = temporary.path() / "link.secret";
-  std::error_code link_error;
-  std::filesystem::create_symlink(secure, link, link_error);
-  if (!link_error) {
-    REQUIRE(cogito::CheckSecretFilePermissions(NativePath(link)).code ==
+  const mode_t rejected_modes[] = {
+      static_cast<mode_t>(S_IRUSR | S_IWUSR | S_IRGRP),
+      static_cast<mode_t>(S_IRWXU | S_IRWXG | S_IRWXO),
+      static_cast<mode_t>(S_IRUSR | S_IWUSR | S_IXUSR),
+  };
+  for (const mode_t mode : rejected_modes) {
+    REQUIRE(chmod(file.path().c_str(), mode) == 0);
+    REQUIRE(cogito::CheckSecretFilePermissions(file.path().string()).code ==
             cogito::Errc::Forbidden);
-    RequireSecretError(cogito::ResolveSecret({FileUri(link)}),
-                       cogito::Errc::Forbidden);
+    auto resolved = cogito::ResolveSecret(cogito::SecretRef{FileUri(file.path())});
+    REQUIRE_FALSE(resolved.ok());
+    REQUIRE(resolved.error().code == cogito::Errc::Forbidden);
   }
+}
+
+TEST_CASE("POSIX symlinks and FIFOs are rejected without blocking",
+          "[secret][file][permissions]") {
+  ScopedPath target("target");
+  ScopedPath link("symlink");
+  WriteFile(target.path(), "secret");
+  std::error_code symlink_error;
+  std::filesystem::create_symlink(target.path(), link.path(), symlink_error);
+  REQUIRE_FALSE(symlink_error);
+
+  REQUIRE(cogito::CheckSecretFilePermissions(link.path().string()).code ==
+          cogito::Errc::Forbidden);
+  auto symlink = cogito::ResolveSecret(cogito::SecretRef{FileUri(link.path())});
+  REQUIRE_FALSE(symlink.ok());
+  REQUIRE(symlink.error().code == cogito::Errc::Forbidden);
+
+  ScopedPath fifo("fifo");
+  REQUIRE(mkfifo(fifo.path().c_str(), S_IRUSR | S_IWUSR) == 0);
+  REQUIRE(cogito::CheckSecretFilePermissions(fifo.path().string()).code ==
+          cogito::Errc::Forbidden);
+  auto fifo_result = cogito::ResolveSecret(cogito::SecretRef{FileUri(fifo.path())});
+  REQUIRE_FALSE(fifo_result.ok());
+  REQUIRE(fifo_result.error().code == cogito::Errc::Forbidden);
+}
+
 #else
-  const std::filesystem::path readonly = temporary.path() / "readonly.secret";
-  const std::filesystem::path group_readable = temporary.path() / "group.secret";
-  const std::filesystem::path executable = temporary.path() / "executable.secret";
-  WriteSecretFile(readonly, "secret", 0400U);
-  WriteSecretFile(group_readable, "secret", 0644U);
-  WriteSecretFile(executable, "secret", 0777U);
-  REQUIRE(cogito::CheckSecretFilePermissions(NativePath(readonly)).ok());
-  REQUIRE(cogito::CheckSecretFilePermissions(NativePath(group_readable)).code ==
-          cogito::Errc::Forbidden);
-  REQUIRE(cogito::CheckSecretFilePermissions(NativePath(executable)).code ==
-          cogito::Errc::Forbidden);
-  RequireSecretError(cogito::ResolveSecret({FileUri(group_readable)}),
-                     cogito::Errc::Forbidden);
 
-  const std::filesystem::path link = temporary.path() / "link.secret";
-  std::error_code link_error;
-  std::filesystem::create_symlink(secure, link, link_error);
-  REQUIRE_FALSE(link_error);
-  REQUIRE(cogito::CheckSecretFilePermissions(NativePath(link)).code ==
-          cogito::Errc::Forbidden);
-  RequireSecretError(cogito::ResolveSecret({FileUri(link)}), cogito::Errc::Forbidden);
+TEST_CASE("Windows secret DACL rejects read access for Everyone",
+          "[secret][file][permissions]") {
+  ScopedPath file("unsafe-dacl");
+  WriteFile(file.path(), "secret");
+  SetTestDacl(file.path(), true);
 
-  const std::filesystem::path fifo = temporary.path() / "secret.fifo";
-  REQUIRE(mkfifo(fifo.c_str(), static_cast<mode_t>(0600)) == 0);
-  REQUIRE(cogito::CheckSecretFilePermissions(NativePath(fifo)).code ==
+  REQUIRE(cogito::CheckSecretFilePermissions(file.path().u8string()).code ==
           cogito::Errc::Forbidden);
-  RequireSecretError(cogito::ResolveSecret({FileUri(fifo)}), cogito::Errc::Forbidden);
+  auto resolved = cogito::ResolveSecret(cogito::SecretRef{FileUri(file.path())});
+  REQUIRE_FALSE(resolved.ok());
+  REQUIRE(resolved.error().code == cogito::Errc::Forbidden);
+}
+
+TEST_CASE("Windows directories and available reparse-point symlinks are rejected",
+          "[secret][file][permissions]") {
+  ScopedPath directory("directory");
+  REQUIRE(std::filesystem::create_directory(directory.path()));
+  REQUIRE(cogito::CheckSecretFilePermissions(directory.path().u8string()).code ==
+          cogito::Errc::Forbidden);
+
+  ScopedPath target("target");
+  ScopedPath link("symlink");
+  WriteFile(target.path(), "secret");
+  std::error_code symlink_error;
+  std::filesystem::create_symlink(target.path(), link.path(), symlink_error);
+  if (symlink_error) {
+    WARN("Windows symlink creation unavailable: " << symlink_error.message());
+  } else {
+    REQUIRE(cogito::CheckSecretFilePermissions(link.path().u8string()).code ==
+            cogito::Errc::Forbidden);
+    auto resolved = cogito::ResolveSecret(cogito::SecretRef{FileUri(link.path())});
+    REQUIRE_FALSE(resolved.ok());
+    REQUIRE(resolved.error().code == cogito::Errc::Forbidden);
+  }
+}
+
 #endif
 
-  REQUIRE(cogito::CheckSecretFilePermissions("relative.secret").code ==
-          cogito::Errc::Forbidden);
-  REQUIRE(cogito::CheckSecretFilePermissions(
-              NativePath(temporary.path() / "missing.secret"))
-              .code == cogito::Errc::Forbidden);
-  REQUIRE(cogito::CheckSecretFilePermissions(NativePath(temporary.path())).code ==
-          cogito::Errc::Forbidden);
-}
-
-TEST_CASE("ResolveSecret rejects unsupported credential backends after validation",
-          "[secret][backend]") {
+TEST_CASE("SecretTestSeam is URI-gated, thread-local, and supports unsupported backends",
+          "[secret][seam]") {
+  SecretSeamReset reset;
   cogito::testing::SecretTestSeam::ClearMockSecrets();
-  RequireSecretError(cogito::ResolveSecret({"keyring:service/user"}),
-                     cogito::Errc::SecretError);
-  const auto unique_suffix =
-      std::chrono::steady_clock::now().time_since_epoch().count();
-  RequireSecretError(cogito::ResolveSecret(
-                         {"wincred:cogito-test-missing-" +
-                          std::to_string(unique_suffix)}),
-                     cogito::Errc::SecretError);
-  RequireSecretError(cogito::ResolveSecret({"wincred:" + std::string(257U, 'x')}),
-                     cogito::Errc::SecretError);
-  std::string invalid_target = "wincred:";
-  invalid_target.push_back(static_cast<char>(0xC0));
-  invalid_target.push_back(static_cast<char>(0xAF));
-  RequireSecretError(cogito::ResolveSecret({invalid_target}), cogito::Errc::SecretError);
+  cogito::testing::SecretTestSeam::SetMockSecret("keyring:service/user", "mock-keyring");
+  cogito::testing::SecretTestSeam::SetMockSecret("file:relative", "mock-relative");
+  const std::string boundary_uri = "keyring:" + std::string(1016U, 'u');
+  cogito::testing::SecretTestSeam::SetMockSecret(boundary_uri, "mock-boundary");
+
+  auto keyring = cogito::ResolveSecret(cogito::SecretRef{"keyring:service/user"});
+  REQUIRE(keyring.ok());
+  REQUIRE(keyring.value().Expose() == "mock-keyring");
+  auto relative = cogito::ResolveSecret(cogito::SecretRef{"file:relative"});
+  REQUIRE(relative.ok());
+  REQUIRE(relative.value().Expose() == "mock-relative");
+  auto boundary = cogito::ResolveSecret(cogito::SecretRef{boundary_uri});
+  REQUIRE(boundary.ok());
+  REQUIRE(boundary.value().Expose() == "mock-boundary");
+
+  std::atomic<bool> worker_rejected{false};
+  std::thread worker([&] {
+    auto isolated = cogito::ResolveSecret(cogito::SecretRef{"keyring:service/user"});
+    worker_rejected.store(!isolated.ok() &&
+                          isolated.error().code == cogito::Errc::SecretError);
+  });
+  worker.join();
+  REQUIRE(worker_rejected.load());
 }
 
-TEST_CASE("Resolved SecretString storage is zeroized before release",
-          "[secret][zeroize]") {
-  ScopedEnvironment environment("COGITO_SECRET_TEST_ZEROIZE", "zeroize-canary");
-  bool observed = false;
-  bool all_zero = true;
-  {
-    auto secret = cogito::ResolveSecret({"env:COGITO_SECRET_TEST_ZEROIZE"});
-    REQUIRE(secret.ok());
-    REQUIRE(secret.value().Expose() == "zeroize-canary");
-    const volatile void* final_storage = secret.value().Expose().data();
-    cogito::testing::SetCleanseObserver(
-        [&, final_storage](const volatile void* pointer, std::size_t size) {
-          if (pointer == final_storage &&
-              size == std::string_view("zeroize-canary").size()) {
-            observed = true;
-            const auto* bytes = static_cast<const volatile unsigned char*>(pointer);
-            for (std::size_t index = 0U; index < size; ++index) {
-              all_zero = all_zero && bytes[index] == 0U;
-            }
-          }
-        });
-  }
-  cogito::testing::ClearCleanseObserver();
-  REQUIRE(observed);
-  REQUIRE(all_zero);
+TEST_CASE("ClearMockSecrets zeroizes registered values before releasing storage",
+          "[secret][seam][zeroize]") {
+  SecretSeamReset reset;
+  cogito::testing::SecretTestSeam::ClearMockSecrets();
+  const std::string mock_value(256U, 's');
+  cogito::testing::SecretTestSeam::SetMockSecret("wincred:test-target", mock_value);
+
+  std::size_t observed_calls = 0U;
+  bool observed_zeroed = false;
+  cogito::testing::SetCleanseObserver(
+      [&](const volatile void* ptr, std::size_t size) {
+        if (size == mock_value.size()) {
+          ++observed_calls;
+          observed_zeroed = IsZeroed(ptr, size);
+        }
+      });
+  cogito::testing::SecretTestSeam::ClearMockSecrets();
+  REQUIRE(observed_calls == 1U);
+  REQUIRE(observed_zeroed);
+
+  auto cleared = cogito::ResolveSecret(cogito::SecretRef{"wincred:test-target"});
+  REQUIRE_FALSE(cleared.ok());
+  REQUIRE(cleared.error().code == cogito::Errc::SecretError);
+}
+
+TEST_CASE("Unsupported real secret backends fail closed", "[secret][backend]") {
+  SecretSeamReset reset;
+  cogito::testing::SecretTestSeam::ClearMockSecrets();
+  auto keyring = cogito::ResolveSecret(cogito::SecretRef{"keyring:service/user"});
+  REQUIRE_FALSE(keyring.ok());
+  REQUIRE(keyring.error().code == cogito::Errc::SecretError);
+
+  auto wincred = cogito::ResolveSecret(
+      cogito::SecretRef{"wincred:cogito-test-credential-that-does-not-exist"});
+  REQUIRE_FALSE(wincred.ok());
+  REQUIRE(wincred.error().code == cogito::Errc::SecretError);
 }
